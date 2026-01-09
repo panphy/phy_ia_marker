@@ -31,6 +31,11 @@ You are an **IB DP Physics Internal Assessment (IA) examiner** with **many years
 {rubric_text}
 [RUBRIC_END]
 
+## Subject specification (supplementary, optional)
+[SPEC_START]
+{spec_text}
+[SPEC_END]
+
 ## IA report (authoritative)
 [IA_START]
 {ia_text}
@@ -99,6 +104,11 @@ You are an **IB DP Physics IA moderator** (experienced, strict, and skeptical). 
 [RUBRIC_START]
 {rubric_text}
 [RUBRIC_END]
+
+## Subject specification (supplementary, optional)
+[SPEC_START]
+{spec_text}
+[SPEC_END]
 
 ## IA report (authoritative)
 [IA_START]
@@ -174,6 +184,11 @@ You are a **kind, supportive IB DP Physics teacher** who is highly familiar with
 [RUBRIC_START]
 {rubric_text}
 [RUBRIC_END]
+
+## Subject specification (supplementary, optional)
+[SPEC_START]
+{spec_text}
+[SPEC_END]
 
 ## IA report (authoritative)
 [IA_START]
@@ -319,8 +334,9 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.title(APP_TITLE)
 
 st.caption(
-    "Upload the IA rubric/spec PDF and the student IA PDF. The app extracts text and generates three Markdown reports "
-    "(Examiner, Moderator, Kind Teacher). Best results when PDFs contain selectable text."
+    "Upload the IA rubric PDF, optionally the IB Physics subject specification, and the student IA PDF. "
+    "The app extracts text and generates three Markdown reports (Examiner, Moderator, Kind Teacher). "
+    "Best results when PDFs contain selectable text."
 )
 
 with st.sidebar:
@@ -331,10 +347,12 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**Tip:** If your PDFs are scanned images, text extraction may fail. Convert to text PDF or add OCR.")
 
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 with col1:
-    rubric_file = st.file_uploader("Upload IB IA rubric/spec PDF", type=["pdf"], key="rubric_pdf")
+    rubric_file = st.file_uploader("Upload IB IA rubric PDF", type=["pdf"], key="rubric_pdf")
 with col2:
+    spec_file = st.file_uploader("Upload subject specification PDF (optional)", type=["pdf"], key="spec_pdf")
+with col3:
     ia_file = st.file_uploader("Upload student IA PDF", type=["pdf"], key="ia_pdf")
 
 run = st.button("Mark IA and generate 3 reports", type="primary", disabled=not (rubric_file and ia_file))
@@ -358,32 +376,53 @@ if run:
     with st.spinner("Extracting text from PDFs..."):
         rubric_bytes = rubric_file.read()
         ia_bytes = ia_file.read()
+        spec_bytes = spec_file.read() if spec_file else None
 
         rubric_text, rubric_pages = extract_pdf_text(rubric_bytes)
         ia_text, ia_pages = extract_pdf_text(ia_bytes)
+        if spec_bytes:
+            spec_text, spec_pages = extract_pdf_text(spec_bytes)
+        else:
+            spec_text, spec_pages = "Not provided.", 0
 
     # Basic quality checks
     if rubric_text.count("[No extractable text") > rubric_pages * 0.7:
         st.warning("Rubric PDF appears to have little extractable text (possibly scanned). Marking quality may suffer.")
     if ia_text.count("[No extractable text") > ia_pages * 0.7:
         st.warning("IA PDF appears to have little extractable text (possibly scanned). Marking quality may suffer.")
+    if spec_bytes and spec_text.count("[No extractable text") > spec_pages * 0.7:
+        st.warning("Subject specification PDF appears to have little extractable text (possibly scanned).")
 
     with st.spinner("Preparing documents (digesting if too large)..."):
         rubric_ready = maybe_digest(client, model, label="Rubric/Specification", raw_text=rubric_text)
         ia_ready = maybe_digest(client, model, label="Student IA", raw_text=ia_text)
+        if spec_bytes:
+            spec_ready = maybe_digest(client, model, label="Subject Specification", raw_text=spec_text)
+            spec_ready_text = spec_ready.text
+            spec_used_digest = spec_ready.used_digest
+        else:
+            spec_ready_text = spec_text
+            spec_used_digest = False
 
         st.session_state.debug_info = {
             "rubric_pages": rubric_pages,
             "ia_pages": ia_pages,
+            "spec_pages": spec_pages,
             "rubric_used_digest": rubric_ready.used_digest,
             "ia_used_digest": ia_ready.used_digest,
+            "spec_used_digest": spec_used_digest,
             "rubric_chars": len(rubric_text),
             "ia_chars": len(ia_text),
+            "spec_chars": len(spec_text),
         }
 
     # 1) Examiner
     with st.spinner("Generating Examiner report..."):
-        examiner_input = EXAMINER_PROMPT.format(rubric_text=rubric_ready.text, ia_text=ia_ready.text)
+        examiner_input = EXAMINER_PROMPT.format(
+            rubric_text=rubric_ready.text,
+            spec_text=spec_ready_text,
+            ia_text=ia_ready.text,
+        )
         examiner_report = call_llm(
             client,
             model=model,
@@ -396,6 +435,7 @@ if run:
     with st.spinner("Generating Moderator report..."):
         moderator_input = MODERATOR_PROMPT.format(
             rubric_text=rubric_ready.text,
+            spec_text=spec_ready_text,
             ia_text=ia_ready.text,
             examiner_report=st.session_state.examiner_report,
         )
@@ -409,7 +449,11 @@ if run:
 
     # 3) Kind teacher
     with st.spinner("Generating Kind Teacher report..."):
-        teacher_input = KIND_TEACHER_PROMPT.format(rubric_text=rubric_ready.text, ia_text=ia_ready.text)
+        teacher_input = KIND_TEACHER_PROMPT.format(
+            rubric_text=rubric_ready.text,
+            spec_text=spec_ready_text,
+            ia_text=ia_ready.text,
+        )
         teacher_report = call_llm(
             client,
             model=model,
