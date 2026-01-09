@@ -1,4 +1,3 @@
-import os
 import io
 import re
 from dataclasses import dataclass
@@ -261,16 +260,11 @@ class AIResult:
 
 
 def get_openai_client() -> OpenAI:
-    # Prefer Streamlit secrets, fallback to env var
-    api_key = None
-    if hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
-        api_key = st.secrets["OPENAI_API_KEY"]
-    api_key = api_key or os.environ.get("OPENAI_API_KEY")
-    if not api_key:
+    if not hasattr(st, "secrets") or "OPENAI_API_KEY" not in st.secrets:
         raise RuntimeError(
-            "OpenAI API key not found. Set OPENAI_API_KEY in Streamlit secrets or environment variables."
+            "OpenAI API key not found. Set OPENAI_API_KEY in Streamlit secrets."
         )
-    return OpenAI(api_key=api_key)
+    return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 
 def call_llm(client: OpenAI, model: str, instructions: str, user_input: str) -> str:
@@ -345,6 +339,7 @@ with st.sidebar:
     st.checkbox("Store API responses (OpenAI)", value=STORE_RESPONSES, disabled=True,
                 help="This app is set to store=false by default in code. Toggle in code if you want storage.")
     st.markdown("---")
+    st.caption("Uses Streamlit secrets key `OPENAI_API_KEY` for OpenAI access.")
     st.markdown("**Tip:** If your PDFs are scanned images, text extraction may fail. Convert to text PDF or add OCR.")
 
 col1, col2, col3 = st.columns(3)
