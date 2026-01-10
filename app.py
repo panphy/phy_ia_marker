@@ -400,19 +400,20 @@ with st.sidebar:
     st.subheader("Settings")
     model = DEFAULT_MODEL
     st.text(f"Model: {model}")
-    st.checkbox(
-        "Store API responses (OpenAI)",
-        value=STORE_RESPONSES,
-        disabled=True,
-        help="This app is set to store=false by default in code. Toggle in code if you want storage.",
-    )
+    # NOTE: "Store API responses" toggle intentionally hidden from UI.
+    # Keep this in code so operators can re-enable it if needed.
+    # st.checkbox(
+    #     "Store API responses (OpenAI)",
+    #     value=STORE_RESPONSES,
+    #     disabled=True,
+    #     help="This app is set to store=false by default in code. Toggle in code if you want storage.",
+    # )
     enable_ocr = st.checkbox("Enable OCR for scanned pages", value=True)
     ocr_language = st.text_input("OCR language (Tesseract)", value="eng")
     pdf_password = st.text_input("PDF password (if encrypted)", type="password")
     st.markdown("---")
     st.caption("Uses Streamlit secrets key `OPENAI_API_KEY` for OpenAI access.")
     st.markdown("**Tip:** If your PDFs are scanned images, text extraction may fail. OCR can recover text.")
-    st.caption("Deterministic scoring is disabled: results may vary slightly between runs.")
 
 if "examiner1_report" not in st.session_state:
     st.session_state.examiner1_report = ""
