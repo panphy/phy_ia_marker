@@ -333,13 +333,14 @@ def ensure_documents(
 
 ia_file = st.file_uploader("Upload student IA PDF", type=["pdf"], key="ia_pdf")
 
-columns = st.columns(2, gap="large")
+columns = st.columns(2, gap="small")
 with columns[0]:
     run_examiner = st.button(
         "Mark with Examiner",
         type="primary",
         disabled=not ia_file,
         help="Strict rubric-first examiner who assigns marks based on evidence.",
+        use_container_width=True,
     )
 with columns[1]:
     run_moderator = st.button(
@@ -347,6 +348,7 @@ with columns[1]:
         type="primary",
         disabled=not ia_file,
         help="Skeptical moderator who independently marks the IA based on evidence.",
+        use_container_width=True,
     )
 selected_action = None
 if run_examiner:
