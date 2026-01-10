@@ -36,7 +36,8 @@ def load_prompt(filename: str) -> str:
     return (PROMPTS_DIR / filename).read_text(encoding="utf-8")
 
 
-EXAMINER_PROMPT = load_prompt("examiner_prompt.md")
+EXAMINER1_PROMPT = load_prompt("examiner_prompt.md")
+EXAMINER2_PROMPT = load_prompt("examiner2_prompt.md")
 MODERATOR_PROMPT = load_prompt("moderator_prompt.md")
 
 
@@ -256,8 +257,10 @@ with st.sidebar:
     st.caption("Uses Streamlit secrets key `OPENAI_API_KEY` for OpenAI access.")
     st.markdown("**Tip:** If your PDFs are scanned images, text extraction may fail. OCR can recover text.")
 
-if "examiner_report" not in st.session_state:
-    st.session_state.examiner_report = ""
+if "examiner1_report" not in st.session_state:
+    st.session_state.examiner1_report = ""
+if "examiner2_report" not in st.session_state:
+    st.session_state.examiner2_report = ""
 if "moderator_report" not in st.session_state:
     st.session_state.moderator_report = ""
 if "debug_info" not in st.session_state:
@@ -273,7 +276,8 @@ if "criteria_text" not in st.session_state:
 
 
 def reset_reports() -> None:
-    st.session_state.examiner_report = ""
+    st.session_state.examiner1_report = ""
+    st.session_state.examiner2_report = ""
     st.session_state.moderator_report = ""
     st.session_state.debug_info = {}
 
@@ -333,26 +337,55 @@ def ensure_documents(
 
 ia_file = st.file_uploader("Upload student IA PDF", type=["pdf"], key="ia_pdf")
 
-columns = st.columns(2, gap="small")
+st.markdown(
+    """
+<style>
+.stButton > button[kind="secondary"] {
+    background-color: #1f8a3b;
+    border-color: #1f8a3b;
+    color: #ffffff;
+}
+.stButton > button[kind="secondary"]:hover {
+    background-color: #16672b;
+    border-color: #16672b;
+    color: #ffffff;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+columns = st.columns(3, gap="small")
 with columns[0]:
-    run_examiner = st.button(
-        "Mark with Examiner",
-        type="primary",
+    run_examiner1 = st.button(
+        "Mark with Examiner 1",
+        type="secondary",
         disabled=not ia_file,
         help="Strict rubric-first examiner who assigns marks based on evidence.",
         use_container_width=True,
     )
 with columns[1]:
+    run_examiner2 = st.button(
+        "Mark with Examiner 2",
+        type="secondary",
+        disabled=not ia_file,
+        help="Equally experienced examiner who assigns marks based on evidence.",
+        use_container_width=True,
+    )
+with columns[2]:
     run_moderator = st.button(
         "Mark with Moderator",
         type="primary",
-        disabled=not ia_file,
-        help="Skeptical moderator who independently marks the IA based on evidence.",
+        disabled=not ia_file
+        or not (st.session_state.examiner1_report and st.session_state.examiner2_report),
+        help="Chief examiner who adjudicates based on the IA, rubric, and both examiner reports.",
         use_container_width=True,
     )
 selected_action = None
-if run_examiner:
-    selected_action = "examiner"
+if run_examiner1:
+    selected_action = "examiner1"
+elif run_examiner2:
+    selected_action = "examiner2"
 elif run_moderator:
     selected_action = "moderator"
 
@@ -379,9 +412,9 @@ if selected_action:
     criteria_ready = AIResult(text=st.session_state.criteria_text, used_digest=False)
     ia_ready = AIResult(text=st.session_state.ia_ready_text, used_digest=st.session_state.ia_used_digest)
 
-    if selected_action == "examiner":
-        with st.spinner("Generating Examiner report..."):
-            examiner_input = EXAMINER_PROMPT.format(
+    if selected_action == "examiner1":
+        with st.spinner("Generating Examiner 1 report..."):
+            examiner_input = EXAMINER1_PROMPT.format(
                 rubric_text=criteria_ready.text,
                 ia_text=ia_ready.text,
             )
@@ -390,31 +423,57 @@ if selected_action:
                     client,
                     model=model,
                     instructions=(
-                        "You are an expert IB DP Physics IA examiner. "
+                        "You are Examiner 1: an expert IB DP Physics IA examiner. "
                         "Follow the rubric strictly and output Markdown."
                     ),
                     user_input=examiner_input,
                 )
             except LLMError as exc:
-                record_llm_error("examiner_report", exc)
+                record_llm_error("examiner1_report", exc)
                 st.error(exc.user_message)
             else:
-                st.session_state.examiner_report = examiner_report
-                st.success("Examiner report generated.")
+                st.session_state.examiner1_report = examiner_report
+                st.success("Examiner 1 report generated.")
+
+    if selected_action == "examiner2":
+        with st.spinner("Generating Examiner 2 report..."):
+            examiner_input = EXAMINER2_PROMPT.format(
+                rubric_text=criteria_ready.text,
+                ia_text=ia_ready.text,
+            )
+            try:
+                examiner_report = call_llm(
+                    client,
+                    model=model,
+                    instructions=(
+                        "You are Examiner 2: an expert IB DP Physics IA examiner. "
+                        "Follow the rubric strictly and output Markdown."
+                    ),
+                    user_input=examiner_input,
+                )
+            except LLMError as exc:
+                record_llm_error("examiner2_report", exc)
+                st.error(exc.user_message)
+            else:
+                st.session_state.examiner2_report = examiner_report
+                st.success("Examiner 2 report generated.")
 
     if selected_action == "moderator":
         with st.spinner("Generating Moderator report..."):
             moderator_input = MODERATOR_PROMPT.format(
                 rubric_text=criteria_ready.text,
                 ia_text=ia_ready.text,
+                examiner1_report=st.session_state.examiner1_report,
+                examiner2_report=st.session_state.examiner2_report,
             )
             try:
                 moderator_report = call_llm(
                     client,
                     model=model,
                     instructions=(
-                        "You are a strict IB DP Physics IA moderator. Independently mark the IA "
-                        "with evidence-led skepticism. Output Markdown."
+                        "You are the chief IB DP Physics IA moderator. "
+                        "Use the IA, rubric, and both examiner reports to adjudicate final marks. "
+                        "Output Markdown."
                     ),
                     user_input=moderator_input,
                 )
@@ -428,23 +487,37 @@ if selected_action:
 # -------------------------
 # Display + downloads
 # -------------------------
-if st.session_state.examiner_report or st.session_state.moderator_report:
+if (
+    st.session_state.examiner1_report
+    or st.session_state.examiner2_report
+    or st.session_state.moderator_report
+):
     st.markdown("---")
     st.subheader("Reports")
 
-    tab1, tab2 = st.tabs(["Examiner report", "Moderator report"])
+    tab1, tab2, tab3 = st.tabs(["Examiner 1 report", "Examiner 2 report", "Moderator report"])
 
     with tab1:
         st.download_button(
-            "Download Examiner report (.md)",
-            data=st.session_state.examiner_report,
-            file_name="examiner_report.md",
+            "Download Examiner 1 report (.md)",
+            data=st.session_state.examiner1_report,
+            file_name="examiner1_report.md",
             mime="text/markdown",
-            disabled=not st.session_state.examiner_report,
+            disabled=not st.session_state.examiner1_report,
         )
-        st.markdown(st.session_state.examiner_report or "_No report yet._")
+        st.markdown(st.session_state.examiner1_report or "_No report yet._")
 
     with tab2:
+        st.download_button(
+            "Download Examiner 2 report (.md)",
+            data=st.session_state.examiner2_report,
+            file_name="examiner2_report.md",
+            mime="text/markdown",
+            disabled=not st.session_state.examiner2_report,
+        )
+        st.markdown(st.session_state.examiner2_report or "_No report yet._")
+
+    with tab3:
         st.download_button(
             "Download Moderator report (.md)",
             data=st.session_state.moderator_report,
