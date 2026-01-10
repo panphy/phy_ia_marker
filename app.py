@@ -10,6 +10,7 @@ from pdf2image import convert_from_bytes
 from pypdf import PdfReader
 import pytesseract
 from openai import OpenAI
+from openai import APIConnectionError, APIError, APITimeoutError, RateLimitError
 
 
 # -------------------------
@@ -89,6 +90,12 @@ class AIResult:
     used_digest: bool = False
 
 
+@dataclass
+class LLMError(Exception):
+    user_message: str
+    debug_info: dict
+
+
 def get_openai_client() -> OpenAI:
     if not hasattr(st, "secrets") or "OPENAI_API_KEY" not in st.secrets:
         raise RuntimeError(
@@ -98,12 +105,37 @@ def get_openai_client() -> OpenAI:
 
 
 def call_llm(client: OpenAI, model: str, instructions: str, user_input: str) -> str:
-    resp = client.responses.create(
-        model=model,
-        instructions=instructions,
-        input=user_input,
-        store=STORE_RESPONSES,
-    )
+    try:
+        resp = client.responses.create(
+            model=model,
+            instructions=instructions,
+            input=user_input,
+            store=STORE_RESPONSES,
+        )
+    except RateLimitError as exc:
+        raise LLMError(
+            user_message="API error: rate limited, try again in 30 seconds.",
+            debug_info={"error_type": "rate_limit", "detail": str(exc)},
+        ) from exc
+    except (APITimeoutError, TimeoutError) as exc:
+        raise LLMError(
+            user_message="API error: request timed out. Try again.",
+            debug_info={"error_type": "timeout", "detail": str(exc)},
+        ) from exc
+    except APIConnectionError as exc:
+        raise LLMError(
+            user_message="API error: connection issue. Check your network and try again.",
+            debug_info={"error_type": "connection", "detail": str(exc)},
+        ) from exc
+    except APIError as exc:
+        raise LLMError(
+            user_message="API error: unexpected response from the model. Try again shortly.",
+            debug_info={
+                "error_type": "api_error",
+                "detail": str(exc),
+                "status_code": getattr(exc, "status_code", None),
+            },
+        ) from exc
     return (resp.output_text or "").strip()
 
 
@@ -222,6 +254,17 @@ def reset_reports() -> None:
     st.session_state.debug_info = {}
 
 
+def record_llm_error(context: str, error: LLMError) -> None:
+    st.session_state.debug_info.setdefault("llm_errors", [])
+    st.session_state.debug_info["llm_errors"].append(
+        {
+            "context": context,
+            "message": error.user_message,
+            "details": error.debug_info,
+        }
+    )
+
+
 def ensure_documents(
     client: OpenAI,
     model: str,
@@ -304,13 +347,18 @@ if selected_action:
         st.error(str(e))
         st.stop()
 
-    ensure_documents(
-        client,
-        model=model,
-        ia_upload=ia_file,
-        use_ocr=enable_ocr,
-        ocr_language_setting=ocr_language,
-    )
+    try:
+        ensure_documents(
+            client,
+            model=model,
+            ia_upload=ia_file,
+            use_ocr=enable_ocr,
+            ocr_language_setting=ocr_language,
+        )
+    except LLMError as exc:
+        record_llm_error("prepare_documents", exc)
+        st.error(exc.user_message)
+        st.stop()
 
     criteria_ready = AIResult(text=st.session_state.criteria_text, used_digest=False)
     ia_ready = AIResult(text=st.session_state.ia_ready_text, used_digest=st.session_state.ia_used_digest)
@@ -321,14 +369,22 @@ if selected_action:
                 rubric_text=criteria_ready.text,
                 ia_text=ia_ready.text,
             )
-            examiner_report = call_llm(
-                client,
-                model=model,
-                instructions="You are an expert IB DP Physics IA examiner. Follow the rubric strictly and output Markdown.",
-                user_input=examiner_input,
-            )
-            st.session_state.examiner_report = examiner_report
-        st.success("Examiner report generated.")
+            try:
+                examiner_report = call_llm(
+                    client,
+                    model=model,
+                    instructions=(
+                        "You are an expert IB DP Physics IA examiner. "
+                        "Follow the rubric strictly and output Markdown."
+                    ),
+                    user_input=examiner_input,
+                )
+            except LLMError as exc:
+                record_llm_error("examiner_report", exc)
+                st.error(exc.user_message)
+            else:
+                st.session_state.examiner_report = examiner_report
+                st.success("Examiner report generated.")
 
     if selected_action == "moderator":
         with st.spinner("Generating Moderator report..."):
@@ -336,17 +392,22 @@ if selected_action:
                 rubric_text=criteria_ready.text,
                 ia_text=ia_ready.text,
             )
-            moderator_report = call_llm(
-                client,
-                model=model,
-                instructions=(
-                    "You are a strict IB DP Physics IA moderator. Independently mark the IA "
-                    "with evidence-led skepticism. Output Markdown."
-                ),
-                user_input=moderator_input,
-            )
-            st.session_state.moderator_report = moderator_report
-        st.success("Moderator report generated.")
+            try:
+                moderator_report = call_llm(
+                    client,
+                    model=model,
+                    instructions=(
+                        "You are a strict IB DP Physics IA moderator. Independently mark the IA "
+                        "with evidence-led skepticism. Output Markdown."
+                    ),
+                    user_input=moderator_input,
+                )
+            except LLMError as exc:
+                record_llm_error("moderator_report", exc)
+                st.error(exc.user_message)
+            else:
+                st.session_state.moderator_report = moderator_report
+                st.success("Moderator report generated.")
 
     if selected_action == "kind_moderator":
         with st.spinner("Generating Kind Moderator report..."):
@@ -354,17 +415,22 @@ if selected_action:
                 rubric_text=criteria_ready.text,
                 ia_text=ia_ready.text,
             )
-            kind_moderator_report = call_llm(
-                client,
-                model=model,
-                instructions=(
-                    "You are a kind IB DP Physics IA moderator. Be supportive, accurate, and rubric-aligned, "
-                    "while slightly less strict than a formal moderator. Output Markdown."
-                ),
-                user_input=kind_moderator_input,
-            )
-            st.session_state.kind_moderator_report = kind_moderator_report
-        st.success("Kind Moderator report generated.")
+            try:
+                kind_moderator_report = call_llm(
+                    client,
+                    model=model,
+                    instructions=(
+                        "You are a kind IB DP Physics IA moderator. Be supportive, accurate, and rubric-aligned, "
+                        "while slightly less strict than a formal moderator. Output Markdown."
+                    ),
+                    user_input=kind_moderator_input,
+                )
+            except LLMError as exc:
+                record_llm_error("kind_moderator_report", exc)
+                st.error(exc.user_message)
+            else:
+                st.session_state.kind_moderator_report = kind_moderator_report
+                st.success("Kind Moderator report generated.")
 
 
 # -------------------------
