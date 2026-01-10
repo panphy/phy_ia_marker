@@ -277,7 +277,7 @@ with columns[1]:
         "Mark with Moderator",
         type="primary",
         disabled=not ia_file,
-        help="Skeptical moderator who audits the examiner's marking for evidence.",
+        help="Skeptical moderator who independently marks the IA based on evidence.",
     )
 with columns[2]:
     run_kind_moderator = st.button(
@@ -329,32 +329,17 @@ if selected_action:
         st.success("Examiner report generated.")
 
     if selected_action == "moderator":
-        if not st.session_state.examiner_report:
-            with st.spinner("Generating Examiner report (required for Moderator)..."):
-                examiner_input = EXAMINER_PROMPT.format(
-                    rubric_text=criteria_ready.text,
-                    ia_text=ia_ready.text,
-                )
-                examiner_report = call_llm(
-                    client,
-                    model=model,
-                    instructions="You are an expert IB DP Physics IA examiner. Follow the rubric strictly and output Markdown.",
-                    user_input=examiner_input,
-                )
-                st.session_state.examiner_report = examiner_report
-            st.success("Examiner report generated.")
         with st.spinner("Generating Moderator report..."):
             moderator_input = MODERATOR_PROMPT.format(
                 rubric_text=criteria_ready.text,
                 ia_text=ia_ready.text,
-                examiner_report=st.session_state.examiner_report,
             )
             moderator_report = call_llm(
                 client,
                 model=model,
                 instructions=(
-                    "You are a strict IB DP Physics IA moderator. Be skeptical and evidence-led, "
-                    "but slightly less strict than the examiner. Output Markdown."
+                    "You are a strict IB DP Physics IA moderator. Independently mark the IA "
+                    "with evidence-led skepticism. Output Markdown."
                 ),
                 user_input=moderator_input,
             )
