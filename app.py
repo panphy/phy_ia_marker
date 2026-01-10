@@ -1,3 +1,4 @@
+import hashlib
 import io
 import re
 from dataclasses import dataclass
@@ -229,7 +230,8 @@ def ensure_documents(
     ocr_language_setting: str,
 ) -> None:
     ia_bytes = ia_upload.getvalue()
-    cache_key = (ia_upload.name, len(ia_bytes), use_ocr, ocr_language_setting, model)
+    sha256_hex = hashlib.sha256(ia_bytes).hexdigest()
+    cache_key = (ia_upload.name, sha256_hex, use_ocr, ocr_language_setting, model)
     if st.session_state.doc_cache_key == cache_key:
         return
 
