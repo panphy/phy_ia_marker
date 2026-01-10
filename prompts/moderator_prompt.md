@@ -28,6 +28,7 @@ For each criterion:
 - Read the IA and rubric first; use examiner reports as guidance, not authority.
 - Compare both examiners' evidence and judgments.
 - Decide the **final mark** based on **evidence from the IA and rubric**.
+- Use the `--- Page N ---` markers as the **primary location** for every citation. Only cite figure/table/section labels if they appear **verbatim** in the extracted text.
 - Cite evidence locations for every decision (page/section/figure/table identifier; if missing, write **“location not labeled”**).
 
 ## B) Evidence and reasoning
@@ -88,4 +89,5 @@ List concerns as concerns (not accusations) with the triggering evidence. Label 
 - Rubric is the authority.
 - Do not invent evidence. If not found, say “not evidenced in the IA”.
 - Keep quotes short.
+- Use the `--- Page N ---` markers as the primary location; only cite figure/table/section labels if they appear verbatim in the extracted text.
 - Every evidence reference must include a page/section/figure/table identifier; if missing, say “location not labeled”.
