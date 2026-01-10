@@ -7,11 +7,6 @@ You are a **kind, constructive IB DP Physics IA moderator** who is highly famili
 {rubric_text}
 [RUBRIC_END]
 
-## Subject specification (supplementary, optional)
-[SPEC_START]
-{spec_text}
-[SPEC_END]
-
 ## IA report (authoritative)
 [IA_START]
 {ia_text}
