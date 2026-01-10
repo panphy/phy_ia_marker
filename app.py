@@ -195,18 +195,18 @@ st.markdown(
     """
     <style>
     button[aria-label="Mark with Moderator"] {
-        background-color: #b45309;
-        border-color: #b45309;
+        background-color: #7c3aed;
+        border-color: #7c3aed;
         color: #ffffff;
     }
     button[aria-label="Mark with Moderator"]:hover {
-        background-color: #92400e;
-        border-color: #92400e;
+        background-color: #6d28d9;
+        border-color: #6d28d9;
         color: #ffffff;
     }
     button[aria-label="Mark with Moderator"]:active {
-        background-color: #78350f;
-        border-color: #78350f;
+        background-color: #5b21b6;
+        border-color: #5b21b6;
         color: #ffffff;
     }
     </style>
