@@ -1,18 +1,17 @@
 import hashlib
-import io
-import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
 
 import streamlit as st
-from pdf2image import convert_from_bytes
-from pypdf import PdfReader
-import pytesseract
 from openai import OpenAI
 from openai import APIConnectionError, APIError, APITimeoutError, RateLimitError
 
+from pdf_utils import (
+    PdfExtractionError,
+    PdfPasswordRequiredError,
+    extract_pdf_text,
+)
 
 # -------------------------
 # Config
@@ -44,44 +43,9 @@ MODERATOR_PROMPT = load_prompt("moderator_prompt.md")
 # -------------------------
 # PDF extraction
 # -------------------------
-def ocr_pdf_page(file_bytes: bytes, page_number: int, language: str) -> str:
-    images = convert_from_bytes(
-        file_bytes,
-        first_page=page_number,
-        last_page=page_number,
-    )
-    if not images:
-        return ""
-    return pytesseract.image_to_string(images[0], lang=language).strip()
-
-
-def extract_pdf_text(file_bytes: bytes, use_ocr: bool, ocr_language: str) -> Tuple[str, int, int]:
-    """Return extracted text, page count, and OCR page count."""
-    reader = PdfReader(io.BytesIO(file_bytes))
-    pages = len(reader.pages)
-    chunks = []
-    ocr_pages = 0
-    for i, page in enumerate(reader.pages, start=1):
-        try:
-            t = page.extract_text() or ""
-        except Exception:
-            t = ""
-        t = re.sub(r"[ \t]+", " ", t).strip()
-        if t:
-            chunks.append(f"\n\n--- Page {i} ---\n{t}")
-        else:
-            ocr_text = ""
-            if use_ocr:
-                try:
-                    ocr_text = ocr_pdf_page(file_bytes, page_number=i, language=ocr_language)
-                except Exception:
-                    ocr_text = ""
-            if ocr_text:
-                ocr_pages += 1
-                chunks.append(f"\n\n--- Page {i} ---\n[OCR]\n{ocr_text}")
-            else:
-                chunks.append(f"\n\n--- Page {i} ---\n[No extractable text found on this page]")
-    return "\n".join(chunks).strip(), pages, ocr_pages
+def show_pdf_error(message: str) -> None:
+    st.error(message)
+    st.stop()
 
 
 # -------------------------
@@ -277,10 +241,15 @@ require_password()
 with st.sidebar:
     st.subheader("Settings")
     model = st.text_input("Model", value=DEFAULT_MODEL)
-    st.checkbox("Store API responses (OpenAI)", value=STORE_RESPONSES, disabled=True,
-                help="This app is set to store=false by default in code. Toggle in code if you want storage.")
+    st.checkbox(
+        "Store API responses (OpenAI)",
+        value=STORE_RESPONSES,
+        disabled=True,
+        help="This app is set to store=false by default in code. Toggle in code if you want storage.",
+    )
     enable_ocr = st.checkbox("Enable OCR for scanned pages", value=True)
     ocr_language = st.text_input("OCR language (Tesseract)", value="eng")
+    pdf_password = st.text_input("PDF password (if encrypted)", type="password")
     st.markdown("---")
     st.caption("Uses Streamlit secrets key `OPENAI_API_KEY` for OpenAI access.")
     st.markdown("**Tip:** If your PDFs are scanned images, text extraction may fail. OCR can recover text.")
@@ -327,6 +296,7 @@ def ensure_documents(
     ia_upload: st.runtime.uploaded_file_manager.UploadedFile,
     use_ocr: bool,
     ocr_language_setting: str,
+    pdf_password: str | None,
 ) -> None:
     ia_bytes = ia_upload.getvalue()
     sha256_hex = hashlib.sha256(ia_bytes).hexdigest()
@@ -336,11 +306,17 @@ def ensure_documents(
 
     reset_reports()
     with st.spinner("Extracting text from PDF..."):
-        ia_text, ia_pages, ia_ocr_pages = extract_pdf_text(
-            ia_bytes,
-            use_ocr=use_ocr,
-            ocr_language=ocr_language_setting,
-        )
+        try:
+            ia_text, ia_pages, ia_ocr_pages = extract_pdf_text(
+                ia_bytes,
+                use_ocr=use_ocr,
+                ocr_language=ocr_language_setting,
+                pdf_password=pdf_password or None,
+            )
+        except PdfPasswordRequiredError as exc:
+            show_pdf_error(exc.user_message)
+        except PdfExtractionError as exc:
+            show_pdf_error(exc.user_message)
         criteria_text = CRITERIA_PATH.read_text(encoding="utf-8")
 
     if ia_text.count("[No extractable text") > ia_pages * 0.7:
@@ -415,6 +391,7 @@ if selected_action:
             ia_upload=ia_file,
             use_ocr=enable_ocr,
             ocr_language_setting=ocr_language,
+            pdf_password=pdf_password,
         )
     except LLMError as exc:
         record_llm_error("prepare_documents", exc)
