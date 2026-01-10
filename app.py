@@ -17,11 +17,10 @@ from pdf_utils import (
 # Config
 # -------------------------
 APP_TITLE = "IB DP Physics IA Marker"
-DEFAULT_MODEL = "gpt-5-mini"  # You can change this (e.g., gpt-5, gpt-5-mini, etc.)
+DEFAULT_MODEL = "gpt-5-mini"
 MAX_RAW_CHARS_BEFORE_DIGEST = 180_000  # if docs are huge, make a structured digest first
 DIGEST_TARGET_CHARS = 70_000           # approximate size of digest text
 DIGEST_CHUNK_TARGET_CHARS = 30_000     # chunk size for per-chunk summaries
-FORCE_FULLTEXT_BELOW_PAGES = 12        # skip digesting for shorter IAs
 STORE_RESPONSES = False                # privacy-friendly default
 CRITERIA_PATH = Path(__file__).resolve().parent / "criteria" / "ib_phy_ia_criteria.md"
 MAX_PASSWORD_ATTEMPTS = 5
@@ -37,7 +36,7 @@ def load_prompt(filename: str) -> str:
     return (PROMPTS_DIR / filename).read_text(encoding="utf-8")
 
 
-EXAMINER1_PROMPT = load_prompt("examiner_prompt.md")
+EXAMINER1_PROMPT = load_prompt("examiner1_prompt.md")
 EXAMINER2_PROMPT = load_prompt("examiner2_prompt.md")
 MODERATOR_PROMPT = load_prompt("moderator_prompt.md")
 
@@ -218,11 +217,7 @@ def maybe_digest(
     model: str,
     label: str,
     raw_text: str,
-    page_count: int,
-    force_fulltext_below_pages: int,
 ) -> AIResult:
-    if page_count < force_fulltext_below_pages:
-        return AIResult(text=raw_text, used_digest=False, used_chunking=False)
     if len(raw_text) <= MAX_RAW_CHARS_BEFORE_DIGEST:
         return AIResult(text=raw_text, used_digest=False, used_chunking=False)
     return make_structured_digest(client, model, label=label, raw_text=raw_text)
@@ -318,7 +313,8 @@ require_password()
 
 with st.sidebar:
     st.subheader("Settings")
-    model = st.text_input("Model", value=DEFAULT_MODEL)
+    model = DEFAULT_MODEL
+    st.text(f"Model: {model}")
     st.checkbox(
         "Store API responses (OpenAI)",
         value=STORE_RESPONSES,
@@ -328,14 +324,6 @@ with st.sidebar:
     enable_ocr = st.checkbox("Enable OCR for scanned pages", value=True)
     ocr_language = st.text_input("OCR language (Tesseract)", value="eng")
     pdf_password = st.text_input("PDF password (if encrypted)", type="password")
-    force_fulltext_below_pages = st.number_input(
-        "Force full-text scoring below page count",
-        min_value=1,
-        max_value=200,
-        value=FORCE_FULLTEXT_BELOW_PAGES,
-        step=1,
-        help="Skip digesting for shorter IAs to keep full-text evidence.",
-    )
     st.markdown("---")
     st.caption("Uses Streamlit secrets key `OPENAI_API_KEY` for OpenAI access.")
     st.markdown("**Tip:** If your PDFs are scanned images, text extraction may fail. OCR can recover text.")
@@ -384,7 +372,6 @@ def ensure_documents(
     use_ocr: bool,
     ocr_language_setting: str,
     pdf_password: str | None,
-    force_fulltext_below_pages: int,
 ) -> None:
     ia_bytes = ia_upload.getvalue()
     sha256_hex = hashlib.sha256(ia_bytes).hexdigest()
@@ -394,7 +381,6 @@ def ensure_documents(
         use_ocr,
         ocr_language_setting,
         model,
-        force_fulltext_below_pages,
     )
     if st.session_state.doc_cache_key == cache_key:
         return
@@ -423,8 +409,6 @@ def ensure_documents(
             model,
             label="Student IA",
             raw_text=ia_text,
-            page_count=ia_pages,
-            force_fulltext_below_pages=force_fulltext_below_pages,
         )
 
         st.session_state.debug_info = {
@@ -434,7 +418,6 @@ def ensure_documents(
             "ia_used_chunking": ia_ready.used_chunking,
             "ia_chars": len(ia_text),
             "criteria_chars": len(criteria_text),
-            "force_fulltext_below_pages": force_fulltext_below_pages,
         }
 
     st.session_state.doc_cache_key = cache_key
@@ -496,7 +479,6 @@ if selected_action:
             use_ocr=enable_ocr,
             ocr_language_setting=ocr_language,
             pdf_password=pdf_password,
-            force_fulltext_below_pages=force_fulltext_below_pages,
         )
     except LLMError as exc:
         record_llm_error("prepare_documents", exc)
