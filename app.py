@@ -418,6 +418,7 @@ if selected_action:
             else:
                 st.session_state.examiner1_report = examiner_report
                 st.success("Examiner 1 report generated.")
+                st.rerun()
 
     if selected_action == "examiner2":
         with st.spinner("Generating Examiner 2 report..."):
@@ -441,6 +442,7 @@ if selected_action:
             else:
                 st.session_state.examiner2_report = examiner_report
                 st.success("Examiner 2 report generated.")
+                st.rerun()
 
     if selected_action == "moderator":
         with st.spinner("Generating Moderator report..."):
