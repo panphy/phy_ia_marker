@@ -157,9 +157,9 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.title(APP_TITLE)
 
 st.caption(
-    "Upload the student IA PDF. The app uses the built-in IA criteria file and "
-    "generates three Markdown reports (Examiner, Moderator, Kind Moderator). "
-    "Best results when PDFs contain selectable text (OCR can help with scanned PDFs)."
+    "Upload the student IA PDF. Choose which AI persona should mark the IA and "
+    "generate a Markdown report. Best results when PDFs contain selectable text "
+    "(OCR can help with scanned PDFs)."
 )
 
 
@@ -196,10 +196,6 @@ with st.sidebar:
     st.caption("Uses Streamlit secrets key `OPENAI_API_KEY` for OpenAI access.")
     st.markdown("**Tip:** If your PDFs are scanned images, text extraction may fail. OCR can recover text.")
 
-ia_file = st.file_uploader("Upload student IA PDF", type=["pdf"], key="ia_pdf")
-
-run = st.button("Mark IA and generate 3 reports", type="primary", disabled=not ia_file)
-
 if "examiner_report" not in st.session_state:
     st.session_state.examiner_report = ""
 if "moderator_report" not in st.session_state:
@@ -208,30 +204,49 @@ if "kind_moderator_report" not in st.session_state:
     st.session_state.kind_moderator_report = ""
 if "debug_info" not in st.session_state:
     st.session_state.debug_info = {}
+if "doc_cache_key" not in st.session_state:
+    st.session_state.doc_cache_key = None
+if "ia_ready_text" not in st.session_state:
+    st.session_state.ia_ready_text = ""
+if "ia_used_digest" not in st.session_state:
+    st.session_state.ia_used_digest = False
+if "criteria_text" not in st.session_state:
+    st.session_state.criteria_text = ""
 
-if run:
-    try:
-        client = get_openai_client()
-    except Exception as e:
-        st.error(str(e))
-        st.stop()
 
-    with st.spinner("Extracting text from PDFs..."):
-        ia_bytes = ia_file.read()
+def reset_reports() -> None:
+    st.session_state.examiner_report = ""
+    st.session_state.moderator_report = ""
+    st.session_state.kind_moderator_report = ""
+    st.session_state.debug_info = {}
+
+
+def ensure_documents(
+    client: OpenAI,
+    model: str,
+    ia_upload: st.runtime.uploaded_file_manager.UploadedFile,
+    use_ocr: bool,
+    ocr_language_setting: str,
+) -> None:
+    ia_bytes = ia_upload.getvalue()
+    cache_key = (ia_upload.name, len(ia_bytes), use_ocr, ocr_language_setting, model)
+    if st.session_state.doc_cache_key == cache_key:
+        return
+
+    reset_reports()
+    with st.spinner("Extracting text from PDF..."):
         ia_text, ia_pages, ia_ocr_pages = extract_pdf_text(
             ia_bytes,
-            use_ocr=enable_ocr,
-            ocr_language=ocr_language,
+            use_ocr=use_ocr,
+            ocr_language=ocr_language_setting,
         )
         criteria_text = CRITERIA_PATH.read_text(encoding="utf-8")
 
-    # Basic quality checks
     if ia_text.count("[No extractable text") > ia_pages * 0.7:
         st.warning("IA PDF appears to have little extractable text (possibly scanned). Marking quality may suffer.")
 
     with st.spinner("Preparing documents (digesting if too large)..."):
         ia_ready = maybe_digest(client, model, label="Student IA", raw_text=ia_text)
-        criteria_ready = AIResult(text=criteria_text, used_digest=False)
 
         st.session_state.debug_info = {
             "ia_pages": ia_pages,
@@ -241,56 +256,112 @@ if run:
             "criteria_chars": len(criteria_text),
         }
 
-    # 1) Examiner
-    with st.spinner("Generating Examiner report..."):
-        examiner_input = EXAMINER_PROMPT.format(
-            rubric_text=criteria_ready.text,
-            ia_text=ia_ready.text,
-        )
-        examiner_report = call_llm(
-            client,
-            model=model,
-            instructions="You are an expert IB DP Physics IA examiner. Follow the rubric strictly and output Markdown.",
-            user_input=examiner_input,
-        )
-        st.session_state.examiner_report = examiner_report
+    st.session_state.doc_cache_key = cache_key
+    st.session_state.ia_ready_text = ia_ready.text
+    st.session_state.ia_used_digest = ia_ready.used_digest
+    st.session_state.criteria_text = criteria_text
 
-    # 2) Moderator (uses examiner output)
-    with st.spinner("Generating Moderator report..."):
-        moderator_input = MODERATOR_PROMPT.format(
-            rubric_text=criteria_ready.text,
-            ia_text=ia_ready.text,
-            examiner_report=st.session_state.examiner_report,
-        )
-        moderator_report = call_llm(
-            client,
-            model=model,
-            instructions=(
-                "You are a strict IB DP Physics IA moderator. Be skeptical and evidence-led, "
-                "but slightly less strict than the examiner. Output Markdown."
-            ),
-            user_input=moderator_input,
-        )
-        st.session_state.moderator_report = moderator_report
 
-    # 3) Kind moderator
-    with st.spinner("Generating Kind Moderator report..."):
-        kind_moderator_input = KIND_MODERATOR_PROMPT.format(
-            rubric_text=criteria_ready.text,
-            ia_text=ia_ready.text,
-        )
-        kind_moderator_report = call_llm(
-            client,
-            model=model,
-            instructions=(
-                "You are a kind IB DP Physics IA moderator. Be supportive, accurate, and rubric-aligned, "
-                "while slightly less strict than a formal moderator. Output Markdown."
-            ),
-            user_input=kind_moderator_input,
-        )
-        st.session_state.kind_moderator_report = kind_moderator_report
+ia_file = st.file_uploader("Upload student IA PDF", type=["pdf"], key="ia_pdf")
 
-    st.success("Done. Reports generated below.")
+columns = st.columns(3)
+with columns[0]:
+    run_examiner = st.button(
+        "Mark with Examiner",
+        type="primary",
+        disabled=not ia_file,
+        help="Strict rubric-first examiner who assigns marks based on evidence.",
+    )
+with columns[1]:
+    run_moderator = st.button(
+        "Mark with Moderator",
+        disabled=not ia_file or not st.session_state.examiner_report,
+        help="Skeptical moderator who audits the examiner's marking for evidence.",
+    )
+with columns[2]:
+    run_kind_moderator = st.button(
+        "Mark with Kind Moderator",
+        disabled=not ia_file,
+        help="Supportive, rubric-aligned feedback with gentle tone.",
+    )
+
+selected_action = None
+if run_examiner:
+    selected_action = "examiner"
+elif run_moderator:
+    selected_action = "moderator"
+elif run_kind_moderator:
+    selected_action = "kind_moderator"
+
+if selected_action:
+    try:
+        client = get_openai_client()
+    except Exception as e:
+        st.error(str(e))
+        st.stop()
+
+    ensure_documents(
+        client,
+        model=model,
+        ia_upload=ia_file,
+        use_ocr=enable_ocr,
+        ocr_language_setting=ocr_language,
+    )
+
+    criteria_ready = AIResult(text=st.session_state.criteria_text, used_digest=False)
+    ia_ready = AIResult(text=st.session_state.ia_ready_text, used_digest=st.session_state.ia_used_digest)
+
+    if selected_action == "examiner":
+        with st.spinner("Generating Examiner report..."):
+            examiner_input = EXAMINER_PROMPT.format(
+                rubric_text=criteria_ready.text,
+                ia_text=ia_ready.text,
+            )
+            examiner_report = call_llm(
+                client,
+                model=model,
+                instructions="You are an expert IB DP Physics IA examiner. Follow the rubric strictly and output Markdown.",
+                user_input=examiner_input,
+            )
+            st.session_state.examiner_report = examiner_report
+        st.success("Examiner report generated.")
+
+    if selected_action == "moderator":
+        with st.spinner("Generating Moderator report..."):
+            moderator_input = MODERATOR_PROMPT.format(
+                rubric_text=criteria_ready.text,
+                ia_text=ia_ready.text,
+                examiner_report=st.session_state.examiner_report,
+            )
+            moderator_report = call_llm(
+                client,
+                model=model,
+                instructions=(
+                    "You are a strict IB DP Physics IA moderator. Be skeptical and evidence-led, "
+                    "but slightly less strict than the examiner. Output Markdown."
+                ),
+                user_input=moderator_input,
+            )
+            st.session_state.moderator_report = moderator_report
+        st.success("Moderator report generated.")
+
+    if selected_action == "kind_moderator":
+        with st.spinner("Generating Kind Moderator report..."):
+            kind_moderator_input = KIND_MODERATOR_PROMPT.format(
+                rubric_text=criteria_ready.text,
+                ia_text=ia_ready.text,
+            )
+            kind_moderator_report = call_llm(
+                client,
+                model=model,
+                instructions=(
+                    "You are a kind IB DP Physics IA moderator. Be supportive, accurate, and rubric-aligned, "
+                    "while slightly less strict than a formal moderator. Output Markdown."
+                ),
+                user_input=kind_moderator_input,
+            )
+            st.session_state.kind_moderator_report = kind_moderator_report
+        st.success("Kind Moderator report generated.")
 
 
 # -------------------------
