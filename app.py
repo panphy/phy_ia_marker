@@ -194,16 +194,22 @@ st.title(APP_TITLE)
 st.markdown(
     """
     <style>
+    button[aria-label="Mark with Examiner 1"],
+    button[aria-label="Mark with Examiner 2"],
     button[aria-label="Mark with Moderator"] {
         background-color: #7c3aed;
         border-color: #7c3aed;
         color: #ffffff;
     }
+    button[aria-label="Mark with Examiner 1"]:hover,
+    button[aria-label="Mark with Examiner 2"]:hover,
     button[aria-label="Mark with Moderator"]:hover {
         background-color: #6d28d9;
         border-color: #6d28d9;
         color: #ffffff;
     }
+    button[aria-label="Mark with Examiner 1"]:active,
+    button[aria-label="Mark with Examiner 2"]:active,
     button[aria-label="Mark with Moderator"]:active {
         background-color: #5b21b6;
         border-color: #5b21b6;
