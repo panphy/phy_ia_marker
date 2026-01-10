@@ -56,8 +56,11 @@ For each criterion, list the key clauses of the **chosen** rubric descriptor and
   - Computational/methodological errors noted: …
 
 ### 3) Marks summary table
-- Table: Criterion | Estimated mark range | Max | One-sentence rationale
-- Add a final table row for **Total** showing the summed mark range and max.
+- Provide a **proper Markdown table** with:
+  - A header row and a separator row using pipes and dashes.
+  - Columns: **Criterion | Estimated mark range | Max | One-sentence rationale**.
+  - A final row for **Total** showing the summed mark range and max.
+  - No bullet-list "table" substitutes.
 
 ### 4) If you had 2 hours, do these first
 ### 5) Encouraging next steps
