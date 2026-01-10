@@ -33,11 +33,7 @@ You do **not** need to literally quote every time, but you must reference **spec
 - If something is present but weak, explain why it only partially meets the descriptor.
 
 ## D) Output format (must follow exactly)
-### 1) Rubric snapshot (from the rubric above)
-- List each criterion name and maximum marks exactly as in the rubric.
-- Summarize key distinguishing features of top/middle/low bands per criterion (brief).
-
-### 2) Criterion-by-criterion marking
+### 1) Criterion-by-criterion marking
 For each criterion:
 
 #### Criterion: <criterion name> (x / max)
@@ -52,12 +48,12 @@ For each criterion:
 - **Key weaknesses holding it back:** (bullets)
 - **Quick improvement advice aligned to rubric:** (bullets)
 
-### 3) Overall results summary
+### 2) Overall results summary
 - Table: Criterion | Mark | Max | One-sentence rationale
-- Total mark: **__/__**
+- Add a final table row for **Total** showing the summed mark and max.
 - 5–10 line moderator-style summary.
 
-### 4) Red flags / academic integrity (only if evidence appears)
+### 3) Red flags / academic integrity (only if evidence appears)
 List concerns as concerns (not accusations) with the triggering evidence.
 
 # Rules
