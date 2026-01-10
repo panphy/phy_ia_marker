@@ -37,12 +37,12 @@ For each criterion:
 - If both examiners missed evidence, call it out and adjust accordingly.
 
 ## C) Data processing checks (global)
-For every criterion, explicitly verify:
+For every criterion, complete if applicable; otherwise state “N/A” and explain why:
 - units are correct and consistent
 - uncertainty propagation is shown or justified
 - calculation steps are clear and reproducible
 - graph-fit validity (fit choice, parameters, goodness-of-fit/residuals) is appropriate
-Note any computational or methodological errors.
+Note any computational or methodological errors. Do not infer missing calculations; only comment if evidence is present.
 
 ## D) Output format (must follow exactly)
 
@@ -58,20 +58,13 @@ Note any computational or methodological errors.
 - **Examiner 2 mark:** __ / __
 - **Rubric basis (descriptor):** “...” (from rubric)
 - **Evidence from IA (text/figure/table/missing):**
-  - Evidence 1: (Type: text/graph/diagram/table/missing) (Location: …)
-    - What it shows / what is missing: …
-    - Why this supports the final mark: …
-  - Evidence 2: …
+  - Provide as many evidence bullets as needed. Each bullet must include type, location, what it shows/misses, and why it supports the final mark.
 - **Reconciliation notes:**
   - Where Examiner 1 was persuasive: …
   - Where Examiner 2 was persuasive: …
   - Why the final mark differs (if it does): …
 - **Data processing checks (units/uncertainty/calculations/fit validity):**
-  - Units: …
-  - Uncertainty propagation: …
-  - Calculation steps: …
-  - Graph-fit validity: …
-  - Computational/methodological errors noted: …
+  - Provide short bullets for applicable items; use “N/A” with a brief reason when not applicable.
 
 ### 3) Final marks table
 Provide a **proper Markdown table** with:

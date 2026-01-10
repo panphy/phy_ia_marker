@@ -29,12 +29,12 @@ Evidence can include:
 You do **not** need to literally quote every time, but you must reference **specific locations** or items. Use the `--- Page N ---` markers as the **primary location** for every citation. Only cite figure/table/section labels if they appear **verbatim** in the extracted text. Every evidence reference **must include a page/section/figure/table identifier** (e.g., “Page 6”, “Page 6, Fig. 2”, “Page 4, Graph: V vs I”). If the location is not labeled in the IA, write **“location not labeled”**.
 
 ## C) Data processing checks (global)
-For every criterion, explicitly verify:
+For every criterion, complete if applicable; otherwise state “N/A” and explain why:
 - units are correct and consistent
 - uncertainty propagation is shown or justified
 - calculation steps are clear and reproducible
 - graph-fit validity (fit choice, parameters, goodness-of-fit/residuals) is appropriate
-Note any computational or methodological errors.
+Note any computational or methodological errors. Do not infer missing calculations; only comment if evidence is present.
 
 ## D) Descriptor-coverage check (per criterion)
 For each criterion, list the key clauses of the **chosen** rubric descriptor and mark each clause as **evidenced** or **not evidenced** (with location).
@@ -51,22 +51,14 @@ For each criterion:
 - **Awarded mark:** x / max
 - **Rubric basis (descriptor):** “…” (from rubric)
 - **Evidence from IA (text/figure/table/missing):**
-  - Evidence 1: (Type: text/graph/diagram/table/missing) (Location: …)
-    - What it shows / what is missing: …
-    - Why this matches (or fails to match) the descriptor: …
-  - Evidence 2: …
+  - Provide as many evidence bullets as needed. Each bullet must include type, location, what it shows/misses, and why it matches (or fails to match) the descriptor.
 - **Descriptor-coverage check (for chosen descriptor clauses):**
-  - Clause 1: evidenced / not evidenced (Location: …)
-  - Clause 2: …
+  - List each key clause and mark as evidenced or not evidenced with location.
 - **Data processing checks (units/uncertainty/calculations/fit validity):**
-  - Units: …
-  - Uncertainty propagation: …
-  - Calculation steps: …
-  - Graph-fit validity: …
-  - Computational/methodological errors noted: …
+  - Provide short bullets for applicable items; use “N/A” with a brief reason when not applicable.
 - **Why not higher:** …
-- **Key weaknesses holding it back:** (bullets)
-- **Quick improvement advice aligned to rubric:** (bullets)
+- **Key weaknesses holding it back:** (bullets as needed)
+- **Quick improvement advice aligned to rubric:** (bullets as needed)
 
 ### 2) Overall results summary
 - Provide a **proper Markdown table** with:
