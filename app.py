@@ -31,9 +31,9 @@ def load_prompt(filename: str) -> str:
     return (PROMPTS_DIR / filename).read_text(encoding="utf-8")
 
 
-EXAMINER_PROMPT = load_prompt("examiner_prompt.txt")
-MODERATOR_PROMPT = load_prompt("moderator_prompt.txt")
-KIND_MODERATOR_PROMPT = load_prompt("kind_moderator_prompt.txt")
+EXAMINER_PROMPT = load_prompt("examiner_prompt.md")
+MODERATOR_PROMPT = load_prompt("moderator_prompt.md")
+KIND_MODERATOR_PROMPT = load_prompt("kind_moderator_prompt.md")
 
 
 # -------------------------
