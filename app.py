@@ -191,6 +191,28 @@ def maybe_digest(client: OpenAI, model: str, label: str, raw_text: str) -> AIRes
 # -------------------------
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.title(APP_TITLE)
+st.markdown(
+    """
+    <style>
+    button[aria-label="Mark with Moderator"] {
+        background-color: #b45309;
+        border-color: #b45309;
+        color: #ffffff;
+    }
+    button[aria-label="Mark with Moderator"]:hover {
+        background-color: #92400e;
+        border-color: #92400e;
+        color: #ffffff;
+    }
+    button[aria-label="Mark with Moderator"]:active {
+        background-color: #78350f;
+        border-color: #78350f;
+        color: #ffffff;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 st.caption(
     "Upload the student IA PDF. Choose which AI persona should mark the IA and "
