@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import streamlit as st
+from pdf2image import convert_from_bytes
 from pypdf import PdfReader
+import pytesseract
 from openai import OpenAI
 
 
@@ -232,11 +234,23 @@ For each criterion:
 # -------------------------
 # PDF extraction
 # -------------------------
-def extract_pdf_text(file_bytes: bytes) -> Tuple[str, int]:
-    """Return extracted text and page count. Works best for text PDFs (not scanned images)."""
+def ocr_pdf_page(file_bytes: bytes, page_number: int, language: str) -> str:
+    images = convert_from_bytes(
+        file_bytes,
+        first_page=page_number,
+        last_page=page_number,
+    )
+    if not images:
+        return ""
+    return pytesseract.image_to_string(images[0], lang=language).strip()
+
+
+def extract_pdf_text(file_bytes: bytes, use_ocr: bool, ocr_language: str) -> Tuple[str, int, int]:
+    """Return extracted text, page count, and OCR page count."""
     reader = PdfReader(io.BytesIO(file_bytes))
     pages = len(reader.pages)
     chunks = []
+    ocr_pages = 0
     for i, page in enumerate(reader.pages, start=1):
         try:
             t = page.extract_text() or ""
@@ -246,8 +260,18 @@ def extract_pdf_text(file_bytes: bytes) -> Tuple[str, int]:
         if t:
             chunks.append(f"\n\n--- Page {i} ---\n{t}")
         else:
-            chunks.append(f"\n\n--- Page {i} ---\n[No extractable text found on this page]")
-    return "\n".join(chunks).strip(), pages
+            ocr_text = ""
+            if use_ocr:
+                try:
+                    ocr_text = ocr_pdf_page(file_bytes, page_number=i, language=ocr_language)
+                except Exception:
+                    ocr_text = ""
+            if ocr_text:
+                ocr_pages += 1
+                chunks.append(f"\n\n--- Page {i} ---\n[OCR]\n{ocr_text}")
+            else:
+                chunks.append(f"\n\n--- Page {i} ---\n[No extractable text found on this page]")
+    return "\n".join(chunks).strip(), pages, ocr_pages
 
 
 # -------------------------
@@ -330,7 +354,7 @@ st.title(APP_TITLE)
 st.caption(
     "Upload the IA rubric PDF, optionally the IB Physics subject specification, and the student IA PDF. "
     "The app extracts text and generates three Markdown reports (Examiner, Moderator, Kind Teacher). "
-    "Best results when PDFs contain selectable text."
+    "Best results when PDFs contain selectable text (OCR can help with scanned PDFs)."
 )
 
 with st.sidebar:
@@ -338,9 +362,11 @@ with st.sidebar:
     model = st.text_input("Model", value=DEFAULT_MODEL)
     st.checkbox("Store API responses (OpenAI)", value=STORE_RESPONSES, disabled=True,
                 help="This app is set to store=false by default in code. Toggle in code if you want storage.")
+    enable_ocr = st.checkbox("Enable OCR for scanned pages", value=True)
+    ocr_language = st.text_input("OCR language (Tesseract)", value="eng")
     st.markdown("---")
     st.caption("Uses Streamlit secrets key `OPENAI_API_KEY` for OpenAI access.")
-    st.markdown("**Tip:** If your PDFs are scanned images, text extraction may fail. Convert to text PDF or add OCR.")
+    st.markdown("**Tip:** If your PDFs are scanned images, text extraction may fail. OCR can recover text.")
 
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -373,12 +399,25 @@ if run:
         ia_bytes = ia_file.read()
         spec_bytes = spec_file.read() if spec_file else None
 
-        rubric_text, rubric_pages = extract_pdf_text(rubric_bytes)
-        ia_text, ia_pages = extract_pdf_text(ia_bytes)
+        rubric_text, rubric_pages, rubric_ocr_pages = extract_pdf_text(
+            rubric_bytes,
+            use_ocr=enable_ocr,
+            ocr_language=ocr_language,
+        )
+        ia_text, ia_pages, ia_ocr_pages = extract_pdf_text(
+            ia_bytes,
+            use_ocr=enable_ocr,
+            ocr_language=ocr_language,
+        )
         if spec_bytes:
-            spec_text, spec_pages = extract_pdf_text(spec_bytes)
+            spec_text, spec_pages, spec_ocr_pages = extract_pdf_text(
+                spec_bytes,
+                use_ocr=enable_ocr,
+                ocr_language=ocr_language,
+            )
         else:
             spec_text, spec_pages = "Not provided.", 0
+            spec_ocr_pages = 0
 
     # Basic quality checks
     if rubric_text.count("[No extractable text") > rubric_pages * 0.7:
@@ -403,6 +442,9 @@ if run:
             "rubric_pages": rubric_pages,
             "ia_pages": ia_pages,
             "spec_pages": spec_pages,
+            "rubric_ocr_pages": rubric_ocr_pages,
+            "ia_ocr_pages": ia_ocr_pages,
+            "spec_ocr_pages": spec_ocr_pages,
             "rubric_used_digest": rubric_ready.used_digest,
             "ia_used_digest": ia_ready.used_digest,
             "spec_used_digest": spec_used_digest,
