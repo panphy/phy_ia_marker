@@ -69,8 +69,11 @@ For each criterion:
 - **Quick improvement advice aligned to rubric:** (bullets)
 
 ### 2) Overall results summary
-- Table: Criterion | Mark | Max | One-sentence rationale
-- Add a final table row for **Total** showing the summed mark and max.
+- Provide a **proper Markdown table** with:
+  - A header row and a separator row using pipes and dashes.
+  - Columns: **Criterion | Mark | Max | One-sentence rationale**.
+  - A final row for **Total** showing the summed mark and max.
+  - No bullet-list "table" substitutes.
 - 5–10 line moderator-style summary.
 
 ### 3) Red flags / academic integrity (only if evidence appears)

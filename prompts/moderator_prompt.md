@@ -61,8 +61,11 @@ For each criterion, list the key clauses of the **chosen** rubric descriptor and
 - **Quick improvement advice aligned to rubric:** (bullets)
 
 ### 3) Summary table
-Criterion | Mark | Max | One-sentence rationale
-Add a final row for **Total** showing the summed mark and max.
+Provide a **proper Markdown table** with:
+- A header row and a separator row using pipes and dashes.
+- Columns: **Criterion | Mark | Max | One-sentence rationale**.
+- A final row for **Total** showing the summed mark and max.
+- No bullet-list "table" substitutes.
 
 ### 4) Final moderation statement
 ### 5) Red flags / integrity concerns (only if evidence appears)
