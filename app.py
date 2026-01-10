@@ -162,6 +162,29 @@ st.caption(
     "Best results when PDFs contain selectable text (OCR can help with scanned PDFs)."
 )
 
+
+def require_password() -> None:
+    if "APP_PASSWORD" not in st.secrets:
+        st.error("App password not configured. Set APP_PASSWORD in Streamlit secrets.")
+        st.stop()
+
+    if "password_ok" not in st.session_state:
+        st.session_state.password_ok = False
+
+    if not st.session_state.password_ok:
+        st.subheader("Password required")
+        password = st.text_input("Password", type="password")
+        if password:
+            if password == st.secrets["APP_PASSWORD"]:
+                st.session_state.password_ok = True
+                st.rerun()
+            else:
+                st.error("Incorrect password.")
+        st.stop()
+
+
+require_password()
+
 with st.sidebar:
     st.subheader("Settings")
     model = st.text_input("Model", value=DEFAULT_MODEL)
