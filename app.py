@@ -23,8 +23,6 @@ DIGEST_TARGET_CHARS = 70_000           # approximate size of digest text
 DIGEST_CHUNK_TARGET_CHARS = 30_000     # chunk size for per-chunk summaries
 FORCE_FULLTEXT_BELOW_PAGES = 12        # skip digesting for shorter IAs
 STORE_RESPONSES = False                # privacy-friendly default
-DETERMINISTIC_TEMPERATURE = 0
-DETERMINISTIC_SEED = None  # Set to an int for fixed-seed sampling if supported by the model.
 CRITERIA_PATH = Path(__file__).resolve().parent / "criteria" / "ib_phy_ia_criteria.md"
 MAX_PASSWORD_ATTEMPTS = 5
 PASSWORD_ATTEMPT_WINDOW_SECONDS = 300
@@ -83,10 +81,7 @@ def call_llm(client: OpenAI, model: str, instructions: str, user_input: str) -> 
             "instructions": instructions,
             "input": user_input,
             "store": STORE_RESPONSES,
-            "temperature": DETERMINISTIC_TEMPERATURE,
         }
-        if DETERMINISTIC_SEED is not None:
-            request_args["seed"] = DETERMINISTIC_SEED
         resp = client.responses.create(
             **request_args,
         )
@@ -344,10 +339,7 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Uses Streamlit secrets key `OPENAI_API_KEY` for OpenAI access.")
     st.markdown("**Tip:** If your PDFs are scanned images, text extraction may fail. OCR can recover text.")
-    st.caption(
-        "Deterministic scoring is enabled: the app uses a fixed temperature for all examiner runs "
-        "to keep outputs consistent."
-    )
+    st.caption("Deterministic scoring is disabled: results may vary slightly between runs.")
 
 if "examiner1_report" not in st.session_state:
     st.session_state.examiner1_report = ""
