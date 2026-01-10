@@ -38,7 +38,6 @@ def load_prompt(filename: str) -> str:
 
 EXAMINER_PROMPT = load_prompt("examiner_prompt.md")
 MODERATOR_PROMPT = load_prompt("moderator_prompt.md")
-KIND_MODERATOR_PROMPT = load_prompt("kind_moderator_prompt.md")
 
 
 # -------------------------
@@ -261,8 +260,6 @@ if "examiner_report" not in st.session_state:
     st.session_state.examiner_report = ""
 if "moderator_report" not in st.session_state:
     st.session_state.moderator_report = ""
-if "kind_moderator_report" not in st.session_state:
-    st.session_state.kind_moderator_report = ""
 if "debug_info" not in st.session_state:
     st.session_state.debug_info = {}
 if "doc_cache_key" not in st.session_state:
@@ -278,7 +275,6 @@ if "criteria_text" not in st.session_state:
 def reset_reports() -> None:
     st.session_state.examiner_report = ""
     st.session_state.moderator_report = ""
-    st.session_state.kind_moderator_report = ""
     st.session_state.debug_info = {}
 
 
@@ -337,7 +333,7 @@ def ensure_documents(
 
 ia_file = st.file_uploader("Upload student IA PDF", type=["pdf"], key="ia_pdf")
 
-columns = st.columns(3)
+columns = st.columns(2, gap="large")
 with columns[0]:
     run_examiner = st.button(
         "Mark with Examiner",
@@ -352,21 +348,11 @@ with columns[1]:
         disabled=not ia_file,
         help="Skeptical moderator who independently marks the IA based on evidence.",
     )
-with columns[2]:
-    run_kind_moderator = st.button(
-        "Mark with Kind Moderator",
-        type="primary",
-        disabled=not ia_file,
-        help="Supportive, rubric-aligned feedback with gentle tone.",
-    )
-
 selected_action = None
 if run_examiner:
     selected_action = "examiner"
 elif run_moderator:
     selected_action = "moderator"
-elif run_kind_moderator:
-    selected_action = "kind_moderator"
 
 if selected_action:
     try:
@@ -437,38 +423,14 @@ if selected_action:
                 st.session_state.moderator_report = moderator_report
                 st.success("Moderator report generated.")
 
-    if selected_action == "kind_moderator":
-        with st.spinner("Generating Kind Moderator report..."):
-            kind_moderator_input = KIND_MODERATOR_PROMPT.format(
-                rubric_text=criteria_ready.text,
-                ia_text=ia_ready.text,
-            )
-            try:
-                kind_moderator_report = call_llm(
-                    client,
-                    model=model,
-                    instructions=(
-                        "You are a kind IB DP Physics IA moderator. Be supportive, accurate, and rubric-aligned, "
-                        "while slightly less strict than a formal moderator. Output Markdown."
-                    ),
-                    user_input=kind_moderator_input,
-                )
-            except LLMError as exc:
-                record_llm_error("kind_moderator_report", exc)
-                st.error(exc.user_message)
-            else:
-                st.session_state.kind_moderator_report = kind_moderator_report
-                st.success("Kind Moderator report generated.")
-
-
 # -------------------------
 # Display + downloads
 # -------------------------
-if st.session_state.examiner_report or st.session_state.moderator_report or st.session_state.kind_moderator_report:
+if st.session_state.examiner_report or st.session_state.moderator_report:
     st.markdown("---")
     st.subheader("Reports")
 
-    tab1, tab2, tab3 = st.tabs(["Examiner report", "Moderator report", "Kind moderator report"])
+    tab1, tab2 = st.tabs(["Examiner report", "Moderator report"])
 
     with tab1:
         st.download_button(
@@ -489,16 +451,6 @@ if st.session_state.examiner_report or st.session_state.moderator_report or st.s
             disabled=not st.session_state.moderator_report,
         )
         st.markdown(st.session_state.moderator_report or "_No report yet._")
-
-    with tab3:
-        st.download_button(
-            "Download Kind Moderator report (.md)",
-            data=st.session_state.kind_moderator_report,
-            file_name="kind_moderator_report.md",
-            mime="text/markdown",
-            disabled=not st.session_state.kind_moderator_report,
-        )
-        st.markdown(st.session_state.kind_moderator_report or "_No report yet._")
 
     with st.expander("Debug info (optional)"):
         st.json(st.session_state.debug_info)
