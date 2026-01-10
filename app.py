@@ -1,4 +1,5 @@
 import hashlib
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -142,26 +143,87 @@ def chunk_text(raw_text: str, target_chars: int) -> list[str]:
     return chunks or [raw_text]
 
 
+def split_pages(raw_text: str) -> list[tuple[int, str]]:
+    parts = re.split(r"--- Page (\d+) ---", raw_text)
+    pages: list[tuple[int, str]] = []
+    for index in range(1, len(parts), 2):
+        page_number = int(parts[index])
+        page_body = parts[index + 1].strip()
+        pages.append((page_number, f"--- Page {page_number} ---\n{page_body}"))
+    return pages
+
+
+def chunk_pages(raw_text: str, target_chars: int) -> list[dict[str, object]]:
+    pages = split_pages(raw_text)
+    if not pages:
+        return [{"start_page": None, "end_page": None, "text": raw_text}]
+
+    chunks: list[dict[str, object]] = []
+    current_pages: list[tuple[int, str]] = []
+    current_len = 0
+
+    for page_number, page_text in pages:
+        page_len = len(page_text)
+        if current_pages and current_len + page_len > target_chars:
+            start_page = current_pages[0][0]
+            end_page = current_pages[-1][0]
+            chunks.append(
+                {
+                    "start_page": start_page,
+                    "end_page": end_page,
+                    "text": "\n\n".join(text for _, text in current_pages),
+                }
+            )
+            current_pages = []
+            current_len = 0
+
+        current_pages.append((page_number, page_text))
+        current_len += page_len
+
+    if current_pages:
+        start_page = current_pages[0][0]
+        end_page = current_pages[-1][0]
+        chunks.append(
+            {
+                "start_page": start_page,
+                "end_page": end_page,
+                "text": "\n\n".join(text for _, text in current_pages),
+            }
+        )
+
+    return chunks
+
+
 def make_structured_digest(client: OpenAI, model: str, label: str, raw_text: str) -> AIResult:
     """
     Compress a large document into a structured digest that preserves marking-relevant evidence.
     This is a pragmatic workaround for context length limits.
     """
     instructions = "You compress documents for evidence-preserving academic review."
-    chunks = chunk_text(raw_text, target_chars=DIGEST_CHUNK_TARGET_CHARS)
+    chunks = chunk_pages(raw_text, target_chars=DIGEST_CHUNK_TARGET_CHARS)
     chunk_summaries = []
     for index, chunk in enumerate(chunks, start=1):
+        start_page = chunk.get("start_page")
+        end_page = chunk.get("end_page")
+        if start_page and end_page:
+            page_label = (
+                f"Page {start_page}" if start_page == end_page else f"Pages {start_page}-{end_page}"
+            )
+        else:
+            page_label = f"Chunk {index}"
         chunk_prompt = f"""
 You are preparing an evidence-preserving digest for an IB Physics IA marking workflow.
 
 Document type: {label}
 Chunk: {index} of {len(chunks)}
+Source pages: {page_label}
 
 Goal:
 - Preserve all information relevant to assessment and moderation.
 - Keep structure. Keep key numbers, units, uncertainties, relationships, model choices.
 - List all figures/tables/graphs you can detect from headings/captions or nearby text.
 - If content seems missing (e.g., no uncertainties, no graph captions), explicitly note it.
+- Include the source page range in each bullet where possible (e.g., "Pages 3-5").
 
 Output format (strict):
 1) Outline or section hints present in this chunk
@@ -174,11 +236,11 @@ Output format (strict):
 8) Missing/unclear items in this chunk
 
 [DOCUMENT_START]
-{chunk}
+{chunk["text"]}
 [DOCUMENT_END]
 """
         chunk_summary = call_llm(client, model, instructions=instructions, user_input=chunk_prompt)
-        chunk_summaries.append(f"[CHUNK {index} SUMMARY]\n{chunk_summary}")
+        chunk_summaries.append(f"[CHUNK {index} | {page_label} SUMMARY]\n{chunk_summary}")
 
     consolidation_prompt = f"""
 You are consolidating chunk-level digests for an IB Physics IA marking workflow.
@@ -190,6 +252,7 @@ Goal:
 - Keep structure. Keep key numbers, units, uncertainties, relationships, model choices.
 - List all figures/tables/graphs you can detect from the summaries.
 - If content seems missing (e.g., no uncertainties, no graph captions), explicitly note it.
+- Preserve page ranges from chunk summaries. When citing evidence, include the page range (e.g., "Pages 3-5").
 
 Output format (strict):
 1) Document outline (headings you can infer)
@@ -210,6 +273,28 @@ Keep it under ~{DIGEST_TARGET_CHARS} characters if possible.
 """
     digest = call_llm(client, model, instructions=instructions, user_input=consolidation_prompt)
     return AIResult(text=digest, used_digest=True, used_chunking=len(chunks) > 1)
+
+
+def build_digest_citation_guidance(used_digest: bool) -> str:
+    if not used_digest:
+        return ""
+    return (
+        "\n\nDigest citation guidance:\n"
+        "- This IA text was summarized into a digest. The digest preserves source page ranges.\n"
+        "- If `--- Page N ---` markers are absent, cite the page ranges or chunk labels shown in the digest\n"
+        "  (e.g., \"Pages 3-5\", \"CHUNK 2 | Pages 3-5\").\n"
+        "- Every evidence reference must include one of these digest page-range identifiers."
+    )
+
+
+def report_has_expected_citations(report: str, used_digest: bool) -> bool:
+    if not report.strip():
+        return True
+    if used_digest:
+        patterns = [r"\bPages?\s+\d", r"\bCHUNK\s+\d", r"\bChunk\s+\d"]
+    else:
+        patterns = [r"\bPage\s+\d"]
+    return any(re.search(pattern, report) for pattern in patterns)
 
 
 def maybe_digest(
@@ -487,12 +572,14 @@ if selected_action:
 
     criteria_ready = AIResult(text=st.session_state.criteria_text, used_digest=False)
     ia_ready = AIResult(text=st.session_state.ia_ready_text, used_digest=st.session_state.ia_used_digest)
+    digest_citation_guidance = build_digest_citation_guidance(st.session_state.ia_used_digest)
 
     if selected_action == "examiner1":
         with st.spinner("Generating Examiner 1 report..."):
             examiner_input = EXAMINER1_PROMPT.format(
                 rubric_text=criteria_ready.text,
                 ia_text=ia_ready.text,
+                digest_citation_guidance=digest_citation_guidance,
             )
             try:
                 examiner_report = call_llm(
@@ -509,6 +596,11 @@ if selected_action:
                 st.error(exc.user_message)
             else:
                 st.session_state.examiner1_report = examiner_report
+                if not report_has_expected_citations(examiner_report, ia_ready.used_digest):
+                    st.warning(
+                        "Examiner 1 report may be missing expected citation markers. "
+                        "Check that evidence references include page or digest range labels."
+                    )
                 st.success("Examiner 1 report generated.")
                 st.rerun()
 
@@ -517,6 +609,7 @@ if selected_action:
             examiner_input = EXAMINER2_PROMPT.format(
                 rubric_text=criteria_ready.text,
                 ia_text=ia_ready.text,
+                digest_citation_guidance=digest_citation_guidance,
             )
             try:
                 examiner_report = call_llm(
@@ -533,6 +626,11 @@ if selected_action:
                 st.error(exc.user_message)
             else:
                 st.session_state.examiner2_report = examiner_report
+                if not report_has_expected_citations(examiner_report, ia_ready.used_digest):
+                    st.warning(
+                        "Examiner 2 report may be missing expected citation markers. "
+                        "Check that evidence references include page or digest range labels."
+                    )
                 st.success("Examiner 2 report generated.")
                 st.rerun()
 
@@ -543,6 +641,7 @@ if selected_action:
                 ia_text=ia_ready.text,
                 examiner1_report=st.session_state.examiner1_report,
                 examiner2_report=st.session_state.examiner2_report,
+                digest_citation_guidance=digest_citation_guidance,
             )
             try:
                 moderator_report = call_llm(
@@ -560,6 +659,11 @@ if selected_action:
                 st.error(exc.user_message)
             else:
                 st.session_state.moderator_report = moderator_report
+                if not report_has_expected_citations(moderator_report, ia_ready.used_digest):
+                    st.warning(
+                        "Moderator report may be missing expected citation markers. "
+                        "Check that evidence references include page or digest range labels."
+                    )
                 st.success("Moderator report generated.")
 
 # -------------------------
