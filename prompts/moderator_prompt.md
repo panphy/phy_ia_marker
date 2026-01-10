@@ -30,6 +30,8 @@ For each criterion:
 - Decide the **final mark** based on **evidence from the IA and rubric**.
 - Use the `--- Page N ---` markers as the **primary location** for every citation. Only cite figure/table/section labels if they appear **verbatim** in the extracted text.
 - Cite evidence locations for every decision (page/section/figure/table identifier; if missing, write **“location not labeled”**).
+- If an examiner claim lacks evidence in the IA text, mark it as “unverified” and do not rely on it for the final mark.
+- When affirming or rejecting examiner claims, cite the relevant `--- Page N ---` marker from the IA text.
 
 ## B) Evidence and reasoning
 - You must reconcile disagreements between Examiner 1 and Examiner 2.
@@ -62,6 +64,7 @@ Note any computational or methodological errors. Do not infer missing calculatio
 - **Reconciliation notes:**
   - Where Examiner 1 was persuasive: …
   - Where Examiner 2 was persuasive: …
+  - Unverified examiner evidence (if any): …
   - Why the final mark differs (if it does): …
 - **Data processing checks (units/uncertainty/calculations/fit validity):**
   - Provide short bullets for applicable items; use “N/A” with a brief reason when not applicable.
