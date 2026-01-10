@@ -17,7 +17,7 @@ from openai import APIConnectionError, APIError, APITimeoutError, RateLimitError
 # -------------------------
 # Config
 # -------------------------
-APP_TITLE = "IB DP Physics IA Marker (Rubric-based)"
+APP_TITLE = "IB DP Physics IA Marker"
 DEFAULT_MODEL = "gpt-5-mini"  # You can change this (e.g., gpt-5, gpt-5-mini, etc.)
 MAX_RAW_CHARS_BEFORE_DIGEST = 180_000  # if docs are huge, make a structured digest first
 DIGEST_TARGET_CHARS = 70_000           # approximate size of digest text
