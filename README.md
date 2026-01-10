@@ -17,27 +17,6 @@ Streamlit app that marks IB DP Physics Internal Assessments using the official r
 - `pdf_utils.py` — PDF parsing and OCR helpers (pypdf + pdf2image + Tesseract).
 - `tests/` — minimal unit tests for PDF helpers.
 
-## Setup
-1. Create a virtual environment and install dependencies.
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   ```
-2. Install system dependencies for PDF + OCR:
-   - **Poppler** (required by `pdf2image` for page rendering).
-   - **Tesseract** (required for OCR, optional if you disable OCR in the UI).
-3. Configure Streamlit secrets:
-   ```toml
-   # .streamlit/secrets.toml
-   OPENAI_API_KEY = "sk-..."
-   APP_PASSWORD = "your-password"
-   ```
-4. Run the app:
-   ```bash
-   streamlit run app.py
-   ```
-
 ## Usage
 1. Open the app in your browser.
 2. Enter the app password.
