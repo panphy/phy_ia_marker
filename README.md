@@ -14,6 +14,29 @@ Streamlit app that marks IB DP Physics Internal Assessments using the official r
 - `app.py` — Streamlit UI, PDF extraction, OpenAI calls, and report generation.
 - `criteria/ib_phy_ia_criteria.md` — rubric content used in prompts.
 - `prompts/` — prompt templates for the two examiners and moderator.
+- `pdf_utils.py` — PDF parsing and OCR helpers (pypdf + pdf2image + Tesseract).
+- `tests/` — minimal unit tests for PDF helpers.
+
+## Setup
+1. Create a virtual environment and install dependencies.
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   ```
+2. Install system dependencies for PDF + OCR:
+   - **Poppler** (required by `pdf2image` for page rendering).
+   - **Tesseract** (required for OCR, optional if you disable OCR in the UI).
+3. Configure Streamlit secrets:
+   ```toml
+   # .streamlit/secrets.toml
+   OPENAI_API_KEY = "sk-..."
+   APP_PASSWORD = "your-password"
+   ```
+4. Run the app:
+   ```bash
+   streamlit run app.py
+   ```
 
 ## Usage
 1. Open the app in your browser.
@@ -28,9 +51,18 @@ Streamlit app that marks IB DP Physics Internal Assessments using the official r
 - **OCR**: toggle in the sidebar; set OCR language via the text input.
 - **Digesting**: large PDFs are summarized into a structured digest before marking.
 - **Storage**: `STORE_RESPONSES` is `False` by default for privacy.
+- **Password throttle**: the app blocks repeated failed password attempts for 5 minutes.
+- **Encrypted PDFs**: supply a PDF password in the sidebar if needed.
+
+## How marking works
+1. The PDF is parsed page-by-page. If a page has no selectable text, OCR is attempted (if enabled).
+2. If the IA is too large, it is summarized into a structured digest to fit the model context.
+3. Two examiner prompts produce independent reports.
+4. A moderator prompt adjudicates the final report using the IA, rubric, and both examiner reports.
 
 ## Troubleshooting
 - **No extractable text**: enable OCR or verify your PDF isn’t image-only.
 - **OCR errors**: confirm Tesseract is installed and the language code exists.
 - **PDF extraction errors**: ensure Poppler is installed and accessible.
 - **Rate limits/timeouts**: retry after a short delay.
+- **Encrypted PDFs**: provide the password in the sidebar if prompted.
