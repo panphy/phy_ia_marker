@@ -20,6 +20,8 @@ APP_TITLE = "IB DP Physics IA Marker"
 DEFAULT_MODEL = "gpt-5-mini"  # You can change this (e.g., gpt-5, gpt-5-mini, etc.)
 MAX_RAW_CHARS_BEFORE_DIGEST = 180_000  # if docs are huge, make a structured digest first
 DIGEST_TARGET_CHARS = 70_000           # approximate size of digest text
+DIGEST_CHUNK_TARGET_CHARS = 30_000     # chunk size for per-chunk summaries
+FORCE_FULLTEXT_BELOW_PAGES = 12        # skip digesting for shorter IAs
 STORE_RESPONSES = False                # privacy-friendly default
 DETERMINISTIC_TEMPERATURE = 0
 DETERMINISTIC_SEED = None  # Set to an int for fixed-seed sampling if supported by the model.
@@ -57,6 +59,7 @@ def show_pdf_error(message: str) -> None:
 class AIResult:
     text: str
     used_digest: bool = False
+    used_chunking: bool = False
 
 
 @dataclass
@@ -114,21 +117,84 @@ def call_llm(client: OpenAI, model: str, instructions: str, user_input: str) -> 
     return (resp.output_text or "").strip()
 
 
-def make_structured_digest(client: OpenAI, model: str, label: str, raw_text: str) -> str:
+def chunk_text(raw_text: str, target_chars: int) -> list[str]:
+    paragraphs = [para.strip() for para in raw_text.split("\n\n") if para.strip()]
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+
+    for paragraph in paragraphs:
+        paragraph_len = len(paragraph)
+        if paragraph_len > target_chars:
+            if current:
+                chunks.append("\n\n".join(current))
+                current = []
+                current_len = 0
+            for start in range(0, paragraph_len, target_chars):
+                chunks.append(paragraph[start:start + target_chars])
+            continue
+
+        if current_len + paragraph_len + 2 > target_chars and current:
+            chunks.append("\n\n".join(current))
+            current = []
+            current_len = 0
+
+        current.append(paragraph)
+        current_len += paragraph_len + 2
+
+    if current:
+        chunks.append("\n\n".join(current))
+
+    return chunks or [raw_text]
+
+
+def make_structured_digest(client: OpenAI, model: str, label: str, raw_text: str) -> AIResult:
     """
     Compress a large document into a structured digest that preserves marking-relevant evidence.
     This is a pragmatic workaround for context length limits.
     """
     instructions = "You compress documents for evidence-preserving academic review."
-    prompt = f"""
+    chunks = chunk_text(raw_text, target_chars=DIGEST_CHUNK_TARGET_CHARS)
+    chunk_summaries = []
+    for index, chunk in enumerate(chunks, start=1):
+        chunk_prompt = f"""
 You are preparing an evidence-preserving digest for an IB Physics IA marking workflow.
 
 Document type: {label}
+Chunk: {index} of {len(chunks)}
 
 Goal:
 - Preserve all information relevant to assessment and moderation.
 - Keep structure. Keep key numbers, units, uncertainties, relationships, model choices.
 - List all figures/tables/graphs you can detect from headings/captions or nearby text.
+- If content seems missing (e.g., no uncertainties, no graph captions), explicitly note it.
+
+Output format (strict):
+1) Outline or section hints present in this chunk
+2) Research question/aim content in this chunk
+3) Variables/method details in this chunk
+4) Data tables mentioned in this chunk (units, repeats, uncertainty fields)
+5) Graphs/figures in this chunk (axes/units/fit type if stated)
+6) Processing/uncertainty/statistics in this chunk
+7) Conclusion/evaluation statements in this chunk
+8) Missing/unclear items in this chunk
+
+[DOCUMENT_START]
+{chunk}
+[DOCUMENT_END]
+"""
+        chunk_summary = call_llm(client, model, instructions=instructions, user_input=chunk_prompt)
+        chunk_summaries.append(f"[CHUNK {index} SUMMARY]\n{chunk_summary}")
+
+    consolidation_prompt = f"""
+You are consolidating chunk-level digests for an IB Physics IA marking workflow.
+
+Document type: {label}
+
+Goal:
+- Merge chunk summaries into a single coherent evidence-preserving digest.
+- Keep structure. Keep key numbers, units, uncertainties, relationships, model choices.
+- List all figures/tables/graphs you can detect from the summaries.
 - If content seems missing (e.g., no uncertainties, no graph captions), explicitly note it.
 
 Output format (strict):
@@ -144,18 +210,27 @@ Output format (strict):
 
 Keep it under ~{DIGEST_TARGET_CHARS} characters if possible.
 
-[DOCUMENT_START]
-{raw_text}
-[DOCUMENT_END]
+[CHUNK_SUMMARIES_START]
+{chr(10).join(chunk_summaries)}
+[CHUNK_SUMMARIES_END]
 """
-    return call_llm(client, model, instructions=instructions, user_input=prompt)
+    digest = call_llm(client, model, instructions=instructions, user_input=consolidation_prompt)
+    return AIResult(text=digest, used_digest=True, used_chunking=len(chunks) > 1)
 
 
-def maybe_digest(client: OpenAI, model: str, label: str, raw_text: str) -> AIResult:
+def maybe_digest(
+    client: OpenAI,
+    model: str,
+    label: str,
+    raw_text: str,
+    page_count: int,
+    force_fulltext_below_pages: int,
+) -> AIResult:
+    if page_count < force_fulltext_below_pages:
+        return AIResult(text=raw_text, used_digest=False, used_chunking=False)
     if len(raw_text) <= MAX_RAW_CHARS_BEFORE_DIGEST:
-        return AIResult(text=raw_text, used_digest=False)
-    digest = make_structured_digest(client, model, label=label, raw_text=raw_text)
-    return AIResult(text=digest, used_digest=True)
+        return AIResult(text=raw_text, used_digest=False, used_chunking=False)
+    return make_structured_digest(client, model, label=label, raw_text=raw_text)
 
 
 # -------------------------
@@ -258,6 +333,14 @@ with st.sidebar:
     enable_ocr = st.checkbox("Enable OCR for scanned pages", value=True)
     ocr_language = st.text_input("OCR language (Tesseract)", value="eng")
     pdf_password = st.text_input("PDF password (if encrypted)", type="password")
+    force_fulltext_below_pages = st.number_input(
+        "Force full-text scoring below page count",
+        min_value=1,
+        max_value=200,
+        value=FORCE_FULLTEXT_BELOW_PAGES,
+        step=1,
+        help="Skip digesting for shorter IAs to keep full-text evidence.",
+    )
     st.markdown("---")
     st.caption("Uses Streamlit secrets key `OPENAI_API_KEY` for OpenAI access.")
     st.markdown("**Tip:** If your PDFs are scanned images, text extraction may fail. OCR can recover text.")
@@ -309,10 +392,18 @@ def ensure_documents(
     use_ocr: bool,
     ocr_language_setting: str,
     pdf_password: str | None,
+    force_fulltext_below_pages: int,
 ) -> None:
     ia_bytes = ia_upload.getvalue()
     sha256_hex = hashlib.sha256(ia_bytes).hexdigest()
-    cache_key = (ia_upload.name, sha256_hex, use_ocr, ocr_language_setting, model)
+    cache_key = (
+        ia_upload.name,
+        sha256_hex,
+        use_ocr,
+        ocr_language_setting,
+        model,
+        force_fulltext_below_pages,
+    )
     if st.session_state.doc_cache_key == cache_key:
         return
 
@@ -335,14 +426,23 @@ def ensure_documents(
         st.warning("IA PDF appears to have little extractable text (possibly scanned). Marking quality may suffer.")
 
     with st.spinner("Preparing documents (digesting if too large)..."):
-        ia_ready = maybe_digest(client, model, label="Student IA", raw_text=ia_text)
+        ia_ready = maybe_digest(
+            client,
+            model,
+            label="Student IA",
+            raw_text=ia_text,
+            page_count=ia_pages,
+            force_fulltext_below_pages=force_fulltext_below_pages,
+        )
 
         st.session_state.debug_info = {
             "ia_pages": ia_pages,
             "ia_ocr_pages": ia_ocr_pages,
             "ia_used_digest": ia_ready.used_digest,
+            "ia_used_chunking": ia_ready.used_chunking,
             "ia_chars": len(ia_text),
             "criteria_chars": len(criteria_text),
+            "force_fulltext_below_pages": force_fulltext_below_pages,
         }
 
     st.session_state.doc_cache_key = cache_key
@@ -404,6 +504,7 @@ if selected_action:
             use_ocr=enable_ocr,
             ocr_language_setting=ocr_language,
             pdf_password=pdf_password,
+            force_fulltext_below_pages=force_fulltext_below_pages,
         )
     except LLMError as exc:
         record_llm_error("prepare_documents", exc)
