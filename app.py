@@ -1,6 +1,7 @@
 import hashlib
 import io
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Tuple
@@ -22,6 +23,8 @@ MAX_RAW_CHARS_BEFORE_DIGEST = 180_000  # if docs are huge, make a structured dig
 DIGEST_TARGET_CHARS = 70_000           # approximate size of digest text
 STORE_RESPONSES = False                # privacy-friendly default
 CRITERIA_PATH = Path(__file__).resolve().parent / "criteria" / "ib_phy_ia_criteria.md"
+MAX_PASSWORD_ATTEMPTS = 5
+PASSWORD_ATTEMPT_WINDOW_SECONDS = 300
 
 # -------------------------
 # Prompt templates (loaded from files)
@@ -203,15 +206,40 @@ def require_password() -> None:
 
     if "password_ok" not in st.session_state:
         st.session_state.password_ok = False
+    if "failed_attempts" not in st.session_state:
+        st.session_state.failed_attempts = 0
+    if "last_failed_at" not in st.session_state:
+        st.session_state.last_failed_at = None
+
+    now = time.time()
+    if st.session_state.last_failed_at:
+        elapsed_since_fail = now - st.session_state.last_failed_at
+        if elapsed_since_fail > PASSWORD_ATTEMPT_WINDOW_SECONDS:
+            st.session_state.failed_attempts = 0
+            st.session_state.last_failed_at = None
 
     if not st.session_state.password_ok:
+        if (
+            st.session_state.failed_attempts >= MAX_PASSWORD_ATTEMPTS
+            and st.session_state.last_failed_at
+            and (now - st.session_state.last_failed_at) < PASSWORD_ATTEMPT_WINDOW_SECONDS
+        ):
+            remaining = int(PASSWORD_ATTEMPT_WINDOW_SECONDS - (now - st.session_state.last_failed_at))
+            st.error("Too many failed attempts. Please wait before trying again.")
+            st.info(f"Cooldown remaining: {remaining} seconds.")
+            st.stop()
+
         st.subheader("Password required")
         password = st.text_input("Password", type="password")
         if password:
             if password == st.secrets["APP_PASSWORD"]:
                 st.session_state.password_ok = True
+                st.session_state.failed_attempts = 0
+                st.session_state.last_failed_at = None
                 st.rerun()
             else:
+                st.session_state.failed_attempts += 1
+                st.session_state.last_failed_at = now
                 st.error("Incorrect password.")
         st.stop()
 
