@@ -275,12 +275,14 @@ with columns[0]:
 with columns[1]:
     run_moderator = st.button(
         "Mark with Moderator",
-        disabled=not ia_file or not st.session_state.examiner_report,
+        type="primary",
+        disabled=not ia_file,
         help="Skeptical moderator who audits the examiner's marking for evidence.",
     )
 with columns[2]:
     run_kind_moderator = st.button(
         "Mark with Kind Moderator",
+        type="primary",
         disabled=not ia_file,
         help="Supportive, rubric-aligned feedback with gentle tone.",
     )
@@ -327,6 +329,20 @@ if selected_action:
         st.success("Examiner report generated.")
 
     if selected_action == "moderator":
+        if not st.session_state.examiner_report:
+            with st.spinner("Generating Examiner report (required for Moderator)..."):
+                examiner_input = EXAMINER_PROMPT.format(
+                    rubric_text=criteria_ready.text,
+                    ia_text=ia_ready.text,
+                )
+                examiner_report = call_llm(
+                    client,
+                    model=model,
+                    instructions="You are an expert IB DP Physics IA examiner. Follow the rubric strictly and output Markdown.",
+                    user_input=examiner_input,
+                )
+                st.session_state.examiner_report = examiner_report
+            st.success("Examiner report generated.")
         with st.spinner("Generating Moderator report..."):
             moderator_input = MODERATOR_PROMPT.format(
                 rubric_text=criteria_ready.text,
