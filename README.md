@@ -1,4 +1,4 @@
-# IB DP Physics IA Marker (Rubric-based)
+# IB DP Physics IA Marker
 
 Streamlit app that marks IB DP Physics Internal Assessments using the official rubric. It extracts text from a student IA PDF (with optional OCR), injects the rubric and IA into structured prompts, and produces examiner/moderator markdown reports.
 
@@ -13,33 +13,6 @@ Streamlit app that marks IB DP Physics Internal Assessments using the official r
 - `app.py` — Streamlit UI, PDF extraction, OpenAI calls, and report generation.
 - `criteria/ib_phy_ia_criteria.md` — rubric content used in prompts.
 - `prompts/` — prompt templates for examiner and moderator.
-
-## Setup
-1. Create a virtual environment (recommended).
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Install system tools for PDF/OCR (required for OCR and some PDFs):
-   - **Tesseract OCR** (for `pytesseract`).
-   - **Poppler** (for `pdf2image`).
-
-## Configure secrets
-This app expects Streamlit secrets:
-
-- `OPENAI_API_KEY` — your OpenAI API key.
-- `APP_PASSWORD` — password gate for the UI.
-
-Create `.streamlit/secrets.toml`:
-```toml
-OPENAI_API_KEY = "your-api-key"
-APP_PASSWORD = "your-app-password"
-```
-
-## Run the app
-```bash
-streamlit run app.py
-```
 
 ## Usage
 1. Open the app in your browser.
