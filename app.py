@@ -21,6 +21,8 @@ DEFAULT_MODEL = "gpt-5-mini"  # You can change this (e.g., gpt-5, gpt-5-mini, et
 MAX_RAW_CHARS_BEFORE_DIGEST = 180_000  # if docs are huge, make a structured digest first
 DIGEST_TARGET_CHARS = 70_000           # approximate size of digest text
 STORE_RESPONSES = False                # privacy-friendly default
+DETERMINISTIC_TEMPERATURE = 0
+DETERMINISTIC_SEED = None  # Set to an int for fixed-seed sampling if supported by the model.
 CRITERIA_PATH = Path(__file__).resolve().parent / "criteria" / "ib_phy_ia_criteria.md"
 MAX_PASSWORD_ATTEMPTS = 5
 PASSWORD_ATTEMPT_WINDOW_SECONDS = 300
@@ -73,11 +75,17 @@ def get_openai_client() -> OpenAI:
 
 def call_llm(client: OpenAI, model: str, instructions: str, user_input: str) -> str:
     try:
+        request_args = {
+            "model": model,
+            "instructions": instructions,
+            "input": user_input,
+            "store": STORE_RESPONSES,
+            "temperature": DETERMINISTIC_TEMPERATURE,
+        }
+        if DETERMINISTIC_SEED is not None:
+            request_args["seed"] = DETERMINISTIC_SEED
         resp = client.responses.create(
-            model=model,
-            instructions=instructions,
-            input=user_input,
-            store=STORE_RESPONSES,
+            **request_args,
         )
     except RateLimitError as exc:
         raise LLMError(
@@ -253,6 +261,10 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Uses Streamlit secrets key `OPENAI_API_KEY` for OpenAI access.")
     st.markdown("**Tip:** If your PDFs are scanned images, text extraction may fail. OCR can recover text.")
+    st.caption(
+        "Deterministic scoring is enabled: the app uses a fixed temperature for all examiner runs "
+        "to keep outputs consistent."
+    )
 
 if "examiner1_report" not in st.session_state:
     st.session_state.examiner1_report = ""
