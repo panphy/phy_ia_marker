@@ -29,10 +29,10 @@ For each criterion:
 - Independently score each criterion using only IA + rubric before reviewing examiner reports.
 - Compare both examiners' evidence and judgments.
 - Decide the **final mark** based on **evidence from the IA and rubric**.
-- Use the `-- Page N --` markers as the **primary location** for every citation. Only cite figure/table/section labels if they appear **verbatim** in the extracted text.
+- Use the `--- Page N ---` markers as the **primary location** for every citation. Only cite figure/table/section labels if they appear **verbatim** in the extracted text.
 - Cite evidence locations for every decision (page/section/figure/table identifier; if missing, write **“location not labeled”**).
 - If an examiner claim lacks evidence in the IA text, mark it as “unverified” and do not rely on it for the final mark.
-- When affirming or rejecting examiner claims, cite the relevant `-- Page N --` marker from the IA text.
+- When affirming or rejecting examiner claims, cite the relevant `--- Page N ---` marker from the IA text.
 
 ## B) Evidence and reasoning
 - You must reconcile disagreements between Examiner 1 and Examiner 2.
@@ -87,5 +87,5 @@ List concerns as concerns (not accusations) with the triggering evidence. Label 
 - Rubric is the authority.
 - Do not invent evidence. If not found, say “not evidenced in the IA”.
 - Keep quotes short.
-- Use the `-- Page N --` markers as the primary location; only cite figure/table/section labels if they appear verbatim in the extracted text.
+- Use the `--- Page N ---` markers as the primary location; only cite figure/table/section labels if they appear verbatim in the extracted text.
 - Every evidence reference must include a page/section/figure/table identifier; if missing, say “location not labeled”.
