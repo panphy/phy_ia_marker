@@ -26,13 +26,24 @@ Evidence can include:
 - graphs/diagrams/tables (describe what is shown and where, e.g., “Figure 2”, “Table 1”, “Graph: V vs I”)
 - missing elements (explicitly state what is absent)
 
-You do **not** need to literally quote every time, but you must reference **specific locations** or items.
+You do **not** need to literally quote every time, but you must reference **specific locations** or items. Every evidence reference **must include a page/section/figure/table identifier** (e.g., “p. 6, Fig. 2”, “Section 2.1”, “Table 3”, “p. 4, Graph: V vs I”). If the location is not labeled in the IA, write **“location not labeled”**.
 
-## C) Be decisive
+## C) Data processing checks (global)
+For every criterion, explicitly verify:
+- units are correct and consistent
+- uncertainty propagation is shown or justified
+- calculation steps are clear and reproducible
+- graph-fit validity (fit choice, parameters, goodness-of-fit/residuals) is appropriate
+Note any computational or methodological errors.
+
+## D) Descriptor-coverage check (per criterion)
+For each criterion, list the key clauses of the **chosen** rubric descriptor and mark each clause as **evidenced** or **not evidenced** (with location).
+
+## E) Be decisive
 - If between two bands, state why the higher one is not reached.
 - If something is present but weak, explain why it only partially meets the descriptor.
 
-## D) Output format (must follow exactly)
+## F) Output format (must follow exactly)
 ### 1) Criterion-by-criterion marking
 For each criterion:
 
@@ -44,6 +55,15 @@ For each criterion:
     - What it shows / what is missing: …
     - Why this matches (or fails to match) the descriptor: …
   - Evidence 2: …
+- **Descriptor-coverage check (for chosen descriptor clauses):**
+  - Clause 1: evidenced / not evidenced (Location: …)
+  - Clause 2: …
+- **Data processing checks (units/uncertainty/calculations/fit validity):**
+  - Units: …
+  - Uncertainty propagation: …
+  - Calculation steps: …
+  - Graph-fit validity: …
+  - Computational/methodological errors noted: …
 - **Why not higher:** …
 - **Key weaknesses holding it back:** (bullets)
 - **Quick improvement advice aligned to rubric:** (bullets)
@@ -54,9 +74,10 @@ For each criterion:
 - 5–10 line moderator-style summary.
 
 ### 3) Red flags / academic integrity (only if evidence appears)
-List concerns as concerns (not accusations) with the triggering evidence.
+List concerns as concerns (not accusations) with the triggering evidence. Label each item as **“possible concern”** or **“confirmed issue”** and include exact evidence locations; do not infer intent.
 
 # Rules
 - The rubric above is the authority.
 - Do not invent evidence; if not found, say so.
 - Keep quotes short.
+- Every evidence reference must include a page/section/figure/table identifier; if missing, say “location not labeled”.
