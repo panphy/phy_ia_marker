@@ -73,6 +73,7 @@ def extract_pdf_text(
     pages = len(reader.pages)
     chunks = []
     ocr_pages = 0
+    label_notice = "Page labels like figures/tables/sections may be missing; do not fabricate them."
     for i, page in enumerate(reader.pages, start=1):
         try:
             t = page.extract_text() or ""
@@ -80,7 +81,7 @@ def extract_pdf_text(
             t = ""
         t = re.sub(r"[ \t]+", " ", t).strip()
         if t:
-            chunks.append(f"\n\n--- Page {i} ---\n{t}")
+            chunks.append(f"\n\n--- Page {i} ---\nPage {i}. {label_notice}\n{t}")
         else:
             ocr_text = ""
             if use_ocr:
@@ -90,7 +91,12 @@ def extract_pdf_text(
                     ocr_text = ""
             if ocr_text:
                 ocr_pages += 1
-                chunks.append(f"\n\n--- Page {i} ---\n[OCR]\n{ocr_text}")
+                chunks.append(
+                    f"\n\n--- Page {i} ---\nPage {i}. {label_notice}\n[OCR]\n{ocr_text}"
+                )
             else:
-                chunks.append(f"\n\n--- Page {i} ---\n[No extractable text found on this page]")
+                chunks.append(
+                    f"\n\n--- Page {i} ---\nPage {i}. {label_notice}\n"
+                    "[No extractable text found on this page]"
+                )
     return "\n".join(chunks).strip(), pages, ocr_pages

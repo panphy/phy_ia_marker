@@ -26,7 +26,7 @@ Evidence can include:
 - graphs/diagrams/tables (describe what is shown and where, e.g., “Figure 2”, “Table 1”, “Graph: V vs I”)
 - missing elements (explicitly state what is absent)
 
-You do **not** need to literally quote every time, but you must reference **specific locations** or items. Every evidence reference **must include a page/section/figure/table identifier** (e.g., “p. 6, Fig. 2”, “Section 2.1”, “Table 3”, “p. 4, Graph: V vs I”). If the location is not labeled in the IA, write **“location not labeled”**.
+You do **not** need to literally quote every time, but you must reference **specific locations** or items. Use the `--- Page N ---` markers as the **primary location** for every citation. Only cite figure/table/section labels if they appear **verbatim** in the extracted text. Every evidence reference **must include a page/section/figure/table identifier** (e.g., “Page 6”, “Page 6, Fig. 2”, “Page 4, Graph: V vs I”). If the location is not labeled in the IA, write **“location not labeled”**.
 
 ## C) Data processing checks (global)
 For every criterion, explicitly verify:
@@ -83,4 +83,5 @@ List concerns as concerns (not accusations) with the triggering evidence. Label 
 - The rubric above is the authority.
 - Do not invent evidence; if not found, say so.
 - Keep quotes short.
+- Use the `--- Page N ---` markers as the primary location; only cite figure/table/section labels if they appear verbatim in the extracted text.
 - Every evidence reference must include a page/section/figure/table identifier; if missing, say “location not labeled”.
