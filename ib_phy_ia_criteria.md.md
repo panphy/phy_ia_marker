@@ -1,7 +1,7 @@
-# IB Physics IA Criteria Extract (Subject Guide)
+# IB Physics IA Criteria (Extracted fromthe Official Subject Guide)
 
 ## Source
-- Document: Physics guide (2025) — Extract
+- Document: Physics guide (2025)
 - Pages used: 72–75
 
 ## Criteria Overview
