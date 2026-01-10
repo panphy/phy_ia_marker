@@ -33,6 +33,7 @@ For each criterion:
 - Cite evidence locations for every decision (page/section/figure/table identifier; if missing, write **“location not labeled”**).
 - If an examiner claim lacks evidence in the IA text, mark it as “unverified” and do not rely on it for the final mark.
 - When affirming or rejecting examiner claims, cite the relevant `--- Page N ---` marker from the IA text.
+{digest_citation_guidance}
 
 ## B) Evidence and reasoning
 - You must reconcile disagreements between Examiner 1 and Examiner 2.
@@ -89,3 +90,4 @@ List concerns as concerns (not accusations) with the triggering evidence. Label 
 - Keep quotes short.
 - Use the `--- Page N ---` markers as the primary location; only cite figure/table/section labels if they appear verbatim in the extracted text.
 - Every evidence reference must include a page/section/figure/table identifier; if missing, say “location not labeled”.
+{digest_citation_guidance}

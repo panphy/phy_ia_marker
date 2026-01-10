@@ -31,6 +31,7 @@ Evidence can include:
 - missing elements (explicitly state what is absent)
 
 You do **not** need to literally quote every time, but you must reference **specific locations** or items. Use the `--- Page N ---` markers as the **primary location** for every citation. Only cite figure/table/section labels if they appear **verbatim** in the extracted text. Every evidence reference **must include a page/section/figure/table identifier** (e.g., “Page 6”, “Page 6, Fig. 2”, “Page 4, Graph: V vs I”). If the location is not labeled in the IA, write **“location not labeled”**.
+{digest_citation_guidance}
 
 ## C) Data processing checks (global)
 For every criterion, complete if applicable; otherwise state “N/A” and explain why:
@@ -81,3 +82,4 @@ List concerns as concerns (not accusations) with the triggering evidence. Label 
 - Keep quotes short.
 - Use the `--- Page N ---` markers as the primary location; only cite figure/table/section labels if they appear verbatim in the extracted text.
 - Every evidence reference must include a page/section/figure/table identifier; if missing, say “location not labeled”.
+{digest_citation_guidance}
