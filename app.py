@@ -336,30 +336,15 @@ def ensure_documents(
 
 
 ia_file = st.file_uploader("Upload student IA PDF", type=["pdf"], key="ia_pdf")
-
-st.markdown(
-    """
-<style>
-.stButton > button[kind="secondary"] {
-    background-color: #1f8a3b;
-    border-color: #1f8a3b;
-    color: #ffffff;
-}
-.stButton > button[kind="secondary"]:hover {
-    background-color: #16672b;
-    border-color: #16672b;
-    color: #ffffff;
-}
-</style>
-""",
-    unsafe_allow_html=True,
+reports_ready = bool(st.session_state.examiner1_report.strip()) and bool(
+    st.session_state.examiner2_report.strip()
 )
 
 columns = st.columns(3, gap="small")
 with columns[0]:
     run_examiner1 = st.button(
         "Mark with Examiner 1",
-        type="secondary",
+        type="primary",
         disabled=not ia_file,
         help="Strict rubric-first examiner who assigns marks based on evidence.",
         use_container_width=True,
@@ -367,7 +352,7 @@ with columns[0]:
 with columns[1]:
     run_examiner2 = st.button(
         "Mark with Examiner 2",
-        type="secondary",
+        type="primary",
         disabled=not ia_file,
         help="Equally experienced examiner who assigns marks based on evidence.",
         use_container_width=True,
@@ -376,8 +361,7 @@ with columns[2]:
     run_moderator = st.button(
         "Mark with Moderator",
         type="primary",
-        disabled=not ia_file
-        or not (st.session_state.examiner1_report and st.session_state.examiner2_report),
+        disabled=not ia_file or not reports_ready,
         help="Chief examiner who adjudicates based on the IA, rubric, and both examiner reports.",
         use_container_width=True,
     )
