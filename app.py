@@ -477,6 +477,8 @@ if "ia_used_digest" not in st.session_state:
     st.session_state.ia_used_digest = False
 if "criteria_text" not in st.session_state:
     st.session_state.criteria_text = ""
+if "last_upload_key" not in st.session_state:
+    st.session_state.last_upload_key = None
 
 
 def reset_reports() -> None:
@@ -484,6 +486,7 @@ def reset_reports() -> None:
     st.session_state.examiner2_report = ""
     st.session_state.moderator_report = ""
     st.session_state.debug_info = {}
+    st.session_state.doc_cache_key = None
 
 
 def record_llm_error(context: str, error: LLMError) -> None:
@@ -570,7 +573,29 @@ def ensure_documents(
     st.session_state.criteria_text = criteria_text
 
 
+has_existing_reports = any(
+    [
+        st.session_state.examiner1_report.strip(),
+        st.session_state.examiner2_report.strip(),
+        st.session_state.moderator_report.strip(),
+    ]
+)
+if has_existing_reports:
+    st.warning(
+        "Uploading a new IA PDF will clear all existing reports. Download any reports you need first."
+    )
+
 ia_file = st.file_uploader("Upload student IA PDF", type=["pdf"], key="ia_pdf")
+if ia_file:
+    ia_bytes = ia_file.getvalue()
+    current_upload_key = (
+        ia_file.name,
+        hashlib.sha256(ia_bytes).hexdigest(),
+    )
+    if st.session_state.last_upload_key != current_upload_key:
+        reset_reports()
+        st.session_state.last_upload_key = current_upload_key
+
 reports_ready = bool(st.session_state.examiner1_report.strip()) and bool(
     st.session_state.examiner2_report.strip()
 )
@@ -738,6 +763,12 @@ if (
 ):
     st.markdown("---")
     st.subheader("Reports")
+    if st.session_state.examiner1_report:
+        st.success("Examiner 1 report completed.")
+    if st.session_state.examiner2_report:
+        st.success("Examiner 2 report completed.")
+    if st.session_state.moderator_report:
+        st.success("Moderator report completed.")
 
     tab1, tab2, tab3 = st.tabs(["Examiner 1 report", "Examiner 2 report", "Moderator report"])
 
