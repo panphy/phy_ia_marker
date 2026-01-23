@@ -49,6 +49,7 @@ For each criterion:
 - Cite evidence locations for every decision (page/section/figure/table identifier; if missing, write **“location not labeled”**).
 - If an examiner claim lacks evidence in the IA text, mark it as “unverified” and do not rely on it for the final mark.
 - When affirming or rejecting examiner claims, cite the relevant `--- Page N ---` marker from the IA text.
+Separate **IA/coverage evidence (cited)** from **visual analysis hints (uncited)**. Citations must come only from the IA text or coverage report; visual-analysis-only content is never evidence.
 {digest_citation_guidance}
 
 ## B) Evidence and reasoning
@@ -81,6 +82,7 @@ Follow the section headings and bullet structure exactly. Do not add extra secti
 - **Rubric basis (descriptor):** “...” (from rubric)
 - **Evidence from IA (text/figure/table/missing):**
   - Provide as many evidence bullets as needed. Each bullet must include type, location, what it shows/misses, and why it supports the final mark.
+  - If you use the visual analysis summary, add separate bullets labeled **“Visual analysis hint (uncited)”** and do not treat them as evidence.
 - **Reconciliation notes:**
   - Where Examiner 1 was persuasive: …
   - Where Examiner 2 was persuasive: …
