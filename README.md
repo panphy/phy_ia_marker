@@ -39,6 +39,18 @@ Streamlit app that marks IB DP Physics Internal Assessments using the official r
 3. Two examiner prompts produce independent reports.
 4. A moderator prompt adjudicates the final report using the IA, rubric, and both examiner reports.
 
+## How visuals are read and used
+1. **Visual extraction**: embedded raster images are extracted from the PDF. Vector graphics are detected but currently recorded as vector entries (not rendered to images).  
+2. **Caption linking**: figure/table captions are inferred from IA text lines that start with `Figure`, `Fig.`, or `Table`, and attached to visuals on the same page when possible.
+3. **Vision analysis**: extracted raster visuals are summarized by a vision-capable model using a strict, five-line schema (type, summary, chart details, table structure, readability issues).
+4. **Coverage reporting**: the app produces a content coverage report that flags missing text, OCR usage/quality, and unresolved figure/table labels.
+5. **Marking safeguards**: prompts require that **only IA text or the coverage report can be cited as evidence**. Visual analysis is treated as **uncited hints** and must remain separate from evidence-backed claims.
+
+**Reliability notes**
+- Visual analysis is capped to a limited number of visuals and **does not yet render vector graphics** for vision, so some charts/diagrams may be summarized only via text references.
+- OCR confidence warnings and “no-text” page flags are intended to prevent over-reliance on unreadable content.
+- For planned upgrades (vector rendering, visual prioritization, and cross-checking visual hints against IA text), see `tasks.md`.
+
 ## Troubleshooting
 - **No extractable text**: enable OCR or verify your PDF isn’t image-only.
 - **OCR errors**: confirm Tesseract is installed and the language code exists.
