@@ -30,7 +30,7 @@ Ensure the system can account for **all content in PDFs** (text, photos, diagram
 - [x] Add an option to upload higher-quality scans if coverage is low.
 
 ## Milestone 6: Prompt hardening and quality improvements
-- [ ] Fix OCR confidence parsing to accept float-string values from Tesseract.
+- [x] Fix OCR confidence parsing to accept float-string values from Tesseract.
 - [ ] Add anti-injection guidance to visual analysis prompts (captions are untrusted input).
 - [ ] Redact injection phrases before visual analysis so captions can't steer vision outputs.
 - [ ] Deduplicate digest citation guidance in examiner prompts to reduce token overhead.
