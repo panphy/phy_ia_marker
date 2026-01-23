@@ -331,6 +331,11 @@ def build_coverage_report(
 ) -> str:
     total_pages = len(diagnostics)
     ocr_pages = [diag.page_number for diag in diagnostics if diag.used_ocr]
+    missing_conf_pages = [
+        diag.page_number
+        for diag in diagnostics
+        if diag.used_ocr and diag.ocr_confidence is None
+    ]
     no_text_pages = [
         diag.page_number
         for diag in diagnostics
@@ -371,6 +376,10 @@ def build_coverage_report(
         report_lines.append(
             f"- Low OCR confidence pages (<{OCR_CONFIDENCE_WARNING_THRESHOLD:.0f}): "
             + ", ".join(map(str, low_conf_pages))
+        )
+    if missing_conf_pages:
+        report_lines.append(
+            "- OCR confidence missing on pages: " + ", ".join(map(str, missing_conf_pages))
         )
     if image_pages:
         report_lines.append(f"- Image pages: {', '.join(map(str, image_pages))}")
@@ -432,6 +441,11 @@ def summarize_coverage_warnings(diagnostics: list[PageExtractionDiagnostic]) -> 
         for diag in diagnostics
         if not diag.has_text and not diag.used_ocr
     ]
+    missing_conf_pages = [
+        diag.page_number
+        for diag in diagnostics
+        if diag.used_ocr and diag.ocr_confidence is None
+    ]
     low_conf_pages = [
         diag.page_number
         for diag in diagnostics
@@ -451,7 +465,79 @@ def summarize_coverage_warnings(diagnostics: list[PageExtractionDiagnostic]) -> 
             + ", ".join(map(str, low_conf_pages))
             + "."
         )
+    if missing_conf_pages:
+        warnings.append(
+            "OCR confidence unavailable on pages: "
+            + ", ".join(map(str, missing_conf_pages))
+            + " (OCR quality unknown)."
+        )
     return warnings
+
+
+def sanitize_visual_analysis_output(raw_output: str) -> tuple[str, bool]:
+    if not raw_output:
+        return (
+            "\n".join(
+                [
+                    "- Visual type: Missing output.",
+                    "- Summary: Missing output.",
+                    "- Chart details: Missing output.",
+                    "- Table structure: Missing output.",
+                    "- Readability issues: Missing output.",
+                ]
+            ),
+            True,
+        )
+    required_keys = [
+        "visual type",
+        "summary",
+        "chart details",
+        "table structure",
+        "readability issues",
+    ]
+    canonical_prefixes = {
+        "visual type": "- Visual type:",
+        "summary": "- Summary:",
+        "chart details": "- Chart details:",
+        "table structure": "- Table structure:",
+        "readability issues": "- Readability issues:",
+    }
+    values = {key: [] for key in required_keys}
+    current_key: str | None = None
+    non_compliant = False
+    lines = [line.strip() for line in raw_output.splitlines() if line.strip()]
+    for line in lines:
+        normalized = line.lstrip("-").strip()
+        key_match = None
+        for key in required_keys:
+            if normalized.lower().startswith(f"{key}:"):
+                key_match = key
+                content = normalized[len(key) + 1 :].strip()
+                values[key].append(content)
+                current_key = key
+                break
+        if key_match is None:
+            if current_key is None:
+                current_key = "summary"
+                non_compliant = True
+            values[current_key].append(normalized)
+            if not line.lower().startswith("-"):
+                non_compliant = True
+
+    for key in required_keys:
+        if not values[key]:
+            values[key].append("Missing or not provided.")
+            non_compliant = True
+
+    sanitized_lines = []
+    for key in required_keys:
+        joined_value = " ".join(value for value in values[key] if value).strip()
+        sanitized_lines.append(f"{canonical_prefixes[key]} {joined_value}")
+
+    if len(lines) != 5:
+        non_compliant = True
+
+    return "\n".join(sanitized_lines), non_compliant
 
 
 def build_visual_analysis_prompt(visual: ExtractedVisual) -> str:
@@ -511,12 +597,14 @@ def analyze_visuals(
             image_bytes=visual.data,
             image_format=visual.image_format,
         )
+        sanitized_analysis, format_warning = sanitize_visual_analysis_output(analysis or "")
         results.append(
             {
                 "page_number": visual.page_number,
                 "name": visual.name,
                 "kind": visual.kind,
-                "analysis": analysis or "No visual analysis output.",
+                "analysis": sanitized_analysis,
+                "format_warning": format_warning,
             }
         )
     return results
@@ -530,7 +618,8 @@ def format_visual_analysis(results: list[dict[str, object]]) -> str:
         page = result.get("page_number", "?")
         name = result.get("name", "visual")
         analysis = result.get("analysis", "")
-        lines.append(f"- Page {page} | {name}: {analysis}")
+        warning = " Format warning: non-compliant output adjusted." if result.get("format_warning") else ""
+        lines.append(f"- Page {page} | {name}: {analysis}{warning}")
     return "\n".join(lines)
 
 
@@ -780,6 +869,8 @@ if "ia_coverage_report" not in st.session_state:
     st.session_state.ia_coverage_report = ""
 if "ia_page_diagnostics" not in st.session_state:
     st.session_state.ia_page_diagnostics = []
+if "ia_coverage_warnings" not in st.session_state:
+    st.session_state.ia_coverage_warnings = []
 if "ia_extracted_visuals" not in st.session_state:
     st.session_state.ia_extracted_visuals = []
 if "ia_visual_analysis" not in st.session_state:
@@ -798,6 +889,7 @@ def reset_reports() -> None:
     st.session_state.doc_cache_key = None
     st.session_state.ia_coverage_report = ""
     st.session_state.ia_page_diagnostics = []
+    st.session_state.ia_coverage_warnings = []
     st.session_state.ia_extracted_visuals = []
     st.session_state.ia_visual_analysis = ""
 
@@ -887,6 +979,7 @@ def ensure_documents(
         unresolved_labels,
         extracted_visuals=visuals_with_captions,
     )
+    coverage_warnings = summarize_coverage_warnings(ia_diagnostics)
 
     visual_analysis_results: list[dict[str, object]] = []
     visual_analysis_error: dict[str, str] | None = None
@@ -934,6 +1027,7 @@ def ensure_documents(
                 for diag in ia_diagnostics
             ],
             "ia_coverage_report": coverage_report,
+            "ia_coverage_warnings": coverage_warnings,
             "ia_used_digest": ia_ready.used_digest,
             "ia_used_chunking": ia_ready.used_chunking,
             "ia_chars": len(ia_text),
@@ -973,6 +1067,7 @@ def ensure_documents(
     st.session_state.criteria_text = criteria_text
     st.session_state.ia_coverage_report = coverage_report
     st.session_state.ia_page_diagnostics = ia_diagnostics
+    st.session_state.ia_coverage_warnings = coverage_warnings
     st.session_state.ia_extracted_visuals = visuals_with_captions
     st.session_state.ia_visual_analysis = visual_analysis_text
 
@@ -1171,9 +1266,9 @@ if selected_action:
 if st.session_state.ia_page_diagnostics:
     st.markdown("---")
     st.subheader("Content coverage")
-    for warning in summarize_coverage_warnings(st.session_state.ia_page_diagnostics):
+    for warning in st.session_state.ia_coverage_warnings:
         st.warning(warning)
-    if summarize_coverage_warnings(st.session_state.ia_page_diagnostics):
+    if st.session_state.ia_coverage_warnings:
         st.info(
             "If coverage is low, consider uploading a higher-quality scan or exporting the PDF "
             "with selectable text to improve marking accuracy."
