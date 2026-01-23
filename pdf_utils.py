@@ -54,12 +54,19 @@ def ocr_pdf_page(file_bytes: bytes, page_number: int, language: str) -> tuple[st
     confidence = None
     try:
         data = pytesseract.image_to_data(image, lang=language, output_type=pytesseract.Output.DICT)
-        confidences = [
-            int(value)
-            for value in data.get("conf", [])
-            if isinstance(value, (int, float)) or (isinstance(value, str) and value.isdigit())
-        ]
-        confidences = [value for value in confidences if value >= 0]
+        confidences: list[float] = []
+        for value in data.get("conf", []):
+            if isinstance(value, (int, float)):
+                parsed_value = float(value)
+            elif isinstance(value, str):
+                try:
+                    parsed_value = float(value)
+                except ValueError:
+                    continue
+            else:
+                continue
+            if parsed_value >= 0:
+                confidences.append(parsed_value)
         if confidences:
             confidence = sum(confidences) / len(confidences)
     except Exception:
