@@ -50,3 +50,10 @@ Ensure the system can account for **all content in PDFs** (text, photos, diagram
 - [x] Render vector graphics to images for vision analysis so charts/diagrams in vector-only PDFs are not skipped.
 - [x] Add a visual prioritization strategy (e.g., caption-matched visuals first) and allow configurable `max_visuals` to reduce missed figures.
 - [x] Add a visual-to-text confirmation step: require any visual-analysis hint to be cross-checked against IA text/captions before it can influence marking.
+
+## Follow-up tasks from review (codebase + prompt QA)
+- [ ] Fix `report_has_expected_citations` to accept `--- Page N ---` style markers even when a digest is used, since digest outputs can preserve page markers and currently trigger false warnings.
+- [ ] When chunking oversized pages in `chunk_pages`, re-inject the page header (`--- Page N ---`) for every sub-chunk so digest summaries always include page identifiers.
+- [ ] Add a limit + sampling strategy for visual analysis (e.g., `max_visuals`, sample uncaptioned visuals) to avoid oversized vision calls on large PDFs while still capturing key evidence.
+- [ ] Tighten prompt instructions to reduce redundancy across examiner prompts and explicitly define the minimal citation format (e.g., `Page N` vs `Pages N-M`) to improve model compliance.
+- [ ] Add tests that cover digest citation warnings, oversized single-page chunking behavior, and prompt QA block insertion to catch regressions.
