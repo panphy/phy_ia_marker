@@ -16,6 +16,7 @@ class PageExtractionDiagnostic:
     used_ocr: bool
     ocr_confidence: float | None
     image_count: int
+    vector_count: int
     text_length: int
 
 
@@ -28,6 +29,7 @@ class ExtractedVisual:
     height: int | None
     data: bytes
     captions: tuple[str, ...] = ()
+    kind: str = "image"
 
 
 @dataclass
@@ -120,6 +122,93 @@ def extract_page_images(page: object, page_number: int) -> list[ExtractedVisual]
     return extracted
 
 
+def _collect_content_streams(page: object) -> list[bytes]:
+    try:
+        contents = page.get_contents()
+    except Exception:
+        return []
+    if contents is None:
+        return []
+    streams = contents if isinstance(contents, list) else [contents]
+    data_list: list[bytes] = []
+    for stream in streams:
+        try:
+            data_list.append(stream.get_data())
+        except Exception:
+            continue
+    return data_list
+
+
+def _has_vector_operators(stream_data: bytes) -> bool:
+    if not stream_data:
+        return False
+    pattern = re.compile(
+        rb"(?<![A-Za-z0-9])(?:m|l|re|c|v|y|h|S|s|f\*?|B\*?|b\*?|n)(?![A-Za-z0-9])"
+    )
+    return bool(pattern.search(stream_data))
+
+
+def extract_vector_graphics(page: object, page_number: int) -> list[ExtractedVisual]:
+    extracted: list[ExtractedVisual] = []
+    vector_streams = [data for data in _collect_content_streams(page) if _has_vector_operators(data)]
+    if vector_streams:
+        media_box = getattr(page, "mediabox", None)
+        width = height = None
+        if media_box is not None:
+            try:
+                width = int(media_box.width)
+                height = int(media_box.height)
+            except Exception:
+                width = height = None
+        extracted.append(
+            ExtractedVisual(
+                page_number=page_number,
+                name=f"page-{page_number}-vector-content",
+                image_format="pdf-vector",
+                width=width,
+                height=height,
+                data=b"\n".join(vector_streams),
+                kind="vector",
+            )
+        )
+    try:
+        resources = page.get("/Resources") or {}
+        xobjects = resources.get("/XObject") or {}
+    except Exception:
+        xobjects = {}
+    for name, xobject_ref in xobjects.items():
+        try:
+            xobject = xobject_ref.get_object()
+        except Exception:
+            continue
+        if xobject.get("/Subtype") != "/Form":
+            continue
+        try:
+            data = xobject.get_data()
+        except Exception:
+            data = b""
+        width = height = None
+        bbox = xobject.get("/BBox")
+        if bbox and len(bbox) == 4:
+            try:
+                width = int(bbox[2] - bbox[0])
+                height = int(bbox[3] - bbox[1])
+            except Exception:
+                width = height = None
+        extracted.append(
+            ExtractedVisual(
+                page_number=page_number,
+                name=str(name),
+                image_format="pdf-form",
+                width=width,
+                height=height,
+                data=data,
+                kind="vector",
+            )
+        )
+    return extracted
+
+
 def extract_pdf_text(
     file_bytes: bytes,
     use_ocr: bool,
@@ -169,7 +258,11 @@ def extract_pdf_text(
     label_notice = "Page labels like figures/tables/sections may be missing; do not fabricate them."
     for i, page in enumerate(reader.pages, start=1):
         image_count = count_page_images(page)
-        visuals.extend(extract_page_images(page, page_number=i))
+        page_images = extract_page_images(page, page_number=i)
+        page_vectors = extract_vector_graphics(page, page_number=i)
+        visuals.extend(page_images)
+        visuals.extend(page_vectors)
+        vector_count = len(page_vectors)
         try:
             t = page.extract_text() or ""
         except Exception:
@@ -184,6 +277,7 @@ def extract_pdf_text(
                     used_ocr=False,
                     ocr_confidence=None,
                     image_count=image_count,
+                    vector_count=vector_count,
                     text_length=len(t),
                 )
             )
@@ -210,6 +304,7 @@ def extract_pdf_text(
                         used_ocr=True,
                         ocr_confidence=ocr_confidence,
                         image_count=image_count,
+                        vector_count=vector_count,
                         text_length=len(ocr_text),
                     )
                 )
@@ -225,6 +320,7 @@ def extract_pdf_text(
                         used_ocr=False,
                         ocr_confidence=None,
                         image_count=image_count,
+                        vector_count=vector_count,
                         text_length=0,
                     )
                 )

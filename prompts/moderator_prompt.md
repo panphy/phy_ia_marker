@@ -19,6 +19,11 @@ You are the **chief IB DP Physics IA moderator**. You only moderate after **both
 [COVERAGE_END]
 - Use this to highlight missing or unreadable evidence; do not invent details.
 
+## Visual analysis summary (vision model, if available)
+[VISUAL_ANALYSIS_START]
+{visual_analysis}
+[VISUAL_ANALYSIS_END]
+
 ## Examiner 1 report (reference)
 [EXAMINER1_START]
 {examiner1_report}

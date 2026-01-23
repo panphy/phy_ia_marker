@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import re
 import time
@@ -21,6 +22,7 @@ from pdf_utils import (
 # -------------------------
 APP_TITLE = "IB DP Physics IA Marker"
 DEFAULT_MODEL = "gpt-5-mini"
+DEFAULT_VISION_MODEL = "gpt-4.1-mini"
 MAX_RAW_CHARS_BEFORE_DIGEST = 180_000  # if docs are huge, make a structured digest first
 DIGEST_TARGET_CHARS = 70_000           # approximate size of digest text
 DIGEST_CHUNK_TARGET_CHARS = 30_000     # chunk size for per-chunk summaries
@@ -122,6 +124,40 @@ def call_llm(client: OpenAI, model: str, instructions: str, user_input: str) -> 
                 "detail": str(exc),
                 "status_code": getattr(exc, "status_code", None),
             },
+        ) from exc
+    return (resp.output_text or "").strip()
+
+
+def call_vision_llm(
+    client: OpenAI,
+    model: str,
+    prompt: str,
+    image_bytes: bytes,
+    image_format: str | None,
+) -> str:
+    if not image_bytes:
+        return ""
+    base64_image = base64.b64encode(image_bytes).decode("utf-8")
+    media_type = f"image/{(image_format or 'png').lower()}"
+    image_url = f"data:{media_type};base64,{base64_image}"
+    try:
+        resp = client.responses.create(
+            model=model,
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt},
+                        {"type": "input_image", "image_url": image_url},
+                    ],
+                }
+            ],
+            store=STORE_RESPONSES,
+        )
+    except (RateLimitError, APITimeoutError, TimeoutError, APIConnectionError, APIError) as exc:
+        raise LLMError(
+            user_message="API error: visual analysis failed. Try again shortly.",
+            debug_info={"error_type": "vision_error", "detail": str(exc)},
         ) from exc
     return (resp.output_text or "").strip()
 
@@ -308,10 +344,14 @@ def build_coverage_report(
         and diag.ocr_confidence < OCR_CONFIDENCE_WARNING_THRESHOLD
     ]
     image_pages = [diag.page_number for diag in diagnostics if diag.image_count > 0]
+    vector_pages = [diag.page_number for diag in diagnostics if diag.vector_count > 0]
     total_visuals = len(extracted_visuals or [])
     captioned_visuals = 0
     if extracted_visuals:
         captioned_visuals = sum(1 for visual in extracted_visuals if getattr(visual, "captions", []))
+    vector_visuals = [
+        visual for visual in (extracted_visuals or []) if getattr(visual, "kind", "image") == "vector"
+    ]
 
     report_lines = [
         "Content coverage report (auto-generated):",
@@ -320,6 +360,7 @@ def build_coverage_report(
         f"- Pages with OCR text: {len(ocr_pages)}",
         f"- Pages with no extractable text: {len(no_text_pages)}",
         f"- Pages with embedded images detected: {len(image_pages)}",
+        f"- Pages with vector graphics detected: {len(vector_pages)}",
         f"- Extracted visuals: {total_visuals}",
     ]
     if ocr_pages:
@@ -333,8 +374,12 @@ def build_coverage_report(
         )
     if image_pages:
         report_lines.append(f"- Image pages: {', '.join(map(str, image_pages))}")
+    if vector_pages:
+        report_lines.append(f"- Vector-graphic pages: {', '.join(map(str, vector_pages))}")
     if total_visuals:
         report_lines.append(f"- Extracted visuals with caption matches: {captioned_visuals}")
+    if vector_visuals:
+        report_lines.append(f"- Extracted vector graphics: {len(vector_visuals)}")
 
     missing_captions = unresolved_labels.get("missing_captions", [])
     unlabeled_mentions = unresolved_labels.get("unlabeled_mentions", [])
@@ -370,6 +415,7 @@ def format_page_diagnostics(diagnostics: list[PageExtractionDiagnostic]) -> list
                     f"{diag.ocr_confidence:.1f}" if diag.ocr_confidence is not None else "—"
                 ),
                 "Images": diag.image_count,
+                "Vectors": diag.vector_count,
                 "Text chars": diag.text_length,
             }
         )
@@ -403,6 +449,82 @@ def summarize_coverage_warnings(diagnostics: list[PageExtractionDiagnostic]) -> 
             + "."
         )
     return warnings
+
+
+def build_visual_analysis_prompt(visual: ExtractedVisual) -> str:
+    caption_text = "\n".join(visual.captions) if getattr(visual, "captions", None) else "None detected."
+    return f"""
+You are analyzing a visual extracted from a student IB Physics IA.
+
+Metadata:
+- Page: {visual.page_number}
+- Name: {visual.name}
+- Kind: {visual.kind}
+- Captions near this visual: {caption_text}
+
+Tasks:
+1) Identify the visual type (photo, diagram, chart/graph, table, equation, other).
+2) If chart/graph: list axes (with units if visible), trend, fit line/model, key values.
+3) If table: extract structure (column headers, units, uncertainty notation, sample row values if legible).
+4) If diagram/photo: describe key elements relevant to physics reasoning.
+5) Note any unreadable or missing parts.
+
+Output format (strict):
+- Visual type: ...
+- Summary: ...
+- Chart details: ... (or "N/A")
+- Table structure: ... (or "N/A")
+- Readability issues: ...
+""".strip()
+
+
+def analyze_visuals(
+    client: OpenAI,
+    model: str,
+    visuals: list[ExtractedVisual],
+    max_visuals: int = 12,
+) -> list[dict[str, object]]:
+    results: list[dict[str, object]] = []
+    for visual in visuals[:max_visuals]:
+        if visual.kind != "image":
+            results.append(
+                {
+                    "page_number": visual.page_number,
+                    "name": visual.name,
+                    "kind": visual.kind,
+                    "analysis": "Vector graphic detected but not rendered for vision analysis.",
+                }
+            )
+            continue
+        prompt = build_visual_analysis_prompt(visual)
+        analysis = call_vision_llm(
+            client,
+            model=model,
+            prompt=prompt,
+            image_bytes=visual.data,
+            image_format=visual.image_format,
+        )
+        results.append(
+            {
+                "page_number": visual.page_number,
+                "name": visual.name,
+                "kind": visual.kind,
+                "analysis": analysis or "No visual analysis output.",
+            }
+        )
+    return results
+
+
+def format_visual_analysis(results: list[dict[str, object]]) -> str:
+    if not results:
+        return "Visual analysis summary: None available."
+    lines = ["Visual analysis summary (vision model):"]
+    for result in results:
+        page = result.get("page_number", "?")
+        name = result.get("name", "visual")
+        analysis = result.get("analysis", "")
+        lines.append(f"- Page {page} | {name}: {analysis}")
+    return "\n".join(lines)
 
 
 def make_structured_digest(client: OpenAI, model: str, label: str, raw_text: str) -> AIResult:
@@ -626,6 +748,8 @@ with st.sidebar:
     # )
     enable_ocr = st.checkbox("Enable OCR for scanned pages", value=True)
     ocr_language = st.text_input("OCR language (Tesseract)", value="eng")
+    enable_visual_analysis = st.checkbox("Enable visual analysis (vision model)", value=True)
+    vision_model = st.text_input("Vision model", value=DEFAULT_VISION_MODEL)
     pdf_password = st.text_input("PDF password (if encrypted)", type="password")
     st.markdown("---")
     st.caption("Uses Streamlit secrets key `OPENAI_API_KEY` for OpenAI access.")
@@ -651,6 +775,8 @@ if "ia_page_diagnostics" not in st.session_state:
     st.session_state.ia_page_diagnostics = []
 if "ia_extracted_visuals" not in st.session_state:
     st.session_state.ia_extracted_visuals = []
+if "ia_visual_analysis" not in st.session_state:
+    st.session_state.ia_visual_analysis = ""
 if "criteria_text" not in st.session_state:
     st.session_state.criteria_text = ""
 if "last_upload_key" not in st.session_state:
@@ -666,6 +792,7 @@ def reset_reports() -> None:
     st.session_state.ia_coverage_report = ""
     st.session_state.ia_page_diagnostics = []
     st.session_state.ia_extracted_visuals = []
+    st.session_state.ia_visual_analysis = ""
 
 
 def record_llm_error(context: str, error: LLMError) -> None:
@@ -682,9 +809,11 @@ def record_llm_error(context: str, error: LLMError) -> None:
 def ensure_documents(
     client: OpenAI,
     model: str,
+    vision_model: str,
     ia_upload: st.runtime.uploaded_file_manager.UploadedFile,
     use_ocr: bool,
     ocr_language_setting: str,
+    enable_visual_analysis: bool,
     pdf_password: str | None,
 ) -> None:
     ia_bytes = ia_upload.getvalue()
@@ -695,6 +824,8 @@ def ensure_documents(
         use_ocr,
         ocr_language_setting,
         model,
+        vision_model,
+        enable_visual_analysis,
     )
     if st.session_state.doc_cache_key == cache_key:
         return
@@ -728,6 +859,7 @@ def ensure_documents(
             height=visual.height,
             data=visual.data,
             captions=tuple(page_captions.get(visual.page_number, [])),
+            kind=visual.kind,
         )
         for visual in ia_visuals
     ]
@@ -736,6 +868,28 @@ def ensure_documents(
         unresolved_labels,
         extracted_visuals=visuals_with_captions,
     )
+
+    visual_analysis_results: list[dict[str, object]] = []
+    visual_analysis_error: dict[str, str] | None = None
+    if enable_visual_analysis and visuals_with_captions:
+        with st.spinner("Analyzing visuals (vision model)..."):
+            try:
+                visual_analysis_results = analyze_visuals(
+                    client,
+                    model=vision_model,
+                    visuals=visuals_with_captions,
+                )
+            except LLMError as exc:
+                visual_analysis_error = {
+                    "message": exc.user_message,
+                    "details": str(exc.debug_info),
+                }
+    if not enable_visual_analysis:
+        visual_analysis_text = "Visual analysis summary: Disabled."
+    else:
+        visual_analysis_text = format_visual_analysis(visual_analysis_results)
+        if visual_analysis_error:
+            visual_analysis_text += f"\n\nVisual analysis error: {visual_analysis_error['message']}"
 
     injection_matches = scan_injection_phrases(ia_text)
     if injection_matches:
@@ -763,6 +917,7 @@ def ensure_documents(
                     "used_ocr": diag.used_ocr,
                     "ocr_confidence": diag.ocr_confidence,
                     "image_count": diag.image_count,
+                    "vector_count": diag.vector_count,
                     "text_length": diag.text_length,
                 }
                 for diag in ia_diagnostics
@@ -773,6 +928,9 @@ def ensure_documents(
             "ia_chars": len(ia_text),
             "criteria_chars": len(criteria_text),
             "ia_visuals_count": len(visuals_with_captions),
+            "ia_visuals_vector_count": len(
+                [visual for visual in visuals_with_captions if visual.kind == "vector"]
+            ),
             "ia_visuals_metadata": [
                 {
                     "page_number": visual.page_number,
@@ -782,9 +940,16 @@ def ensure_documents(
                     "height": visual.height,
                     "byte_size": len(visual.data),
                     "captions": list(visual.captions),
+                    "kind": visual.kind,
                 }
                 for visual in visuals_with_captions
             ],
+            "visual_analysis": {
+                "enabled": enable_visual_analysis,
+                "model": vision_model,
+                "results_count": len(visual_analysis_results),
+                "error": visual_analysis_error,
+            },
             "injection_scan": {
                 "matches": injection_matches,
                 "redacted": bool(injection_matches),
@@ -798,6 +963,7 @@ def ensure_documents(
     st.session_state.ia_coverage_report = coverage_report
     st.session_state.ia_page_diagnostics = ia_diagnostics
     st.session_state.ia_extracted_visuals = visuals_with_captions
+    st.session_state.ia_visual_analysis = visual_analysis_text
 
 
 has_existing_reports = any(
@@ -871,9 +1037,11 @@ if selected_action:
         ensure_documents(
             client,
             model=model,
+            vision_model=vision_model,
             ia_upload=ia_file,
             use_ocr=enable_ocr,
             ocr_language_setting=ocr_language,
+            enable_visual_analysis=enable_visual_analysis,
             pdf_password=pdf_password,
         )
     except LLMError as exc:
@@ -891,6 +1059,7 @@ if selected_action:
                 rubric_text=criteria_ready.text,
                 ia_text=ia_ready.text,
                 coverage_report=st.session_state.ia_coverage_report,
+                visual_analysis=st.session_state.ia_visual_analysis,
                 digest_citation_guidance=digest_citation_guidance,
             )
             try:
@@ -923,6 +1092,7 @@ if selected_action:
                 rubric_text=criteria_ready.text,
                 ia_text=ia_ready.text,
                 coverage_report=st.session_state.ia_coverage_report,
+                visual_analysis=st.session_state.ia_visual_analysis,
                 digest_citation_guidance=digest_citation_guidance,
             )
             try:
@@ -957,6 +1127,7 @@ if selected_action:
                 examiner1_report=st.session_state.examiner1_report,
                 examiner2_report=st.session_state.examiner2_report,
                 coverage_report=st.session_state.ia_coverage_report,
+                visual_analysis=st.session_state.ia_visual_analysis,
                 digest_citation_guidance=digest_citation_guidance,
             )
             try:
@@ -999,6 +1170,9 @@ if st.session_state.ia_page_diagnostics:
     st.text(st.session_state.ia_coverage_report)
     with st.expander("Per-page extraction diagnostics"):
         st.table(format_page_diagnostics(st.session_state.ia_page_diagnostics))
+    if st.session_state.ia_visual_analysis:
+        with st.expander("Visual analysis (vision model)"):
+            st.text(st.session_state.ia_visual_analysis)
 
 # -------------------------
 # Display + downloads
