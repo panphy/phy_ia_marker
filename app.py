@@ -31,6 +31,7 @@ CRITERIA_PATH = Path(__file__).resolve().parent / "criteria" / "ib_phy_ia_criter
 MAX_PASSWORD_ATTEMPTS = 5
 PASSWORD_ATTEMPT_WINDOW_SECONDS = 300
 OCR_CONFIDENCE_WARNING_THRESHOLD = 60.0
+VISUAL_CONFIRM_THRESHOLD = 25
 
 # -------------------------
 # Prompt templates (loaded from files)
@@ -608,7 +609,6 @@ def analyze_visuals(
     client: OpenAI,
     model: str,
     visuals: list[ExtractedVisual],
-    max_visuals: int = 12,
 ) -> list[dict[str, object]]:
     results: list[dict[str, object]] = []
     prioritized_visuals: list[ExtractedVisual] = []
@@ -618,7 +618,7 @@ def analyze_visuals(
             prioritized_visuals.append(visual)
         else:
             uncaptioned_visuals.append(visual)
-    selected_visuals = (prioritized_visuals + uncaptioned_visuals)[:max_visuals]
+    selected_visuals = prioritized_visuals + uncaptioned_visuals
     for visual in selected_visuals:
         if visual.kind != "image" and visual.kind != "vector":
             results.append(
@@ -889,7 +889,7 @@ require_password()
 with st.sidebar:
     st.subheader("Settings")
     model = DEFAULT_MODEL
-    st.text(f"Model: {model}")
+    st.text(f"AI Model: {model}")
     # NOTE: "Store API responses" toggle intentionally hidden from UI.
     # Keep this in code so operators can re-enable it if needed.
     # st.checkbox(
@@ -901,17 +901,9 @@ with st.sidebar:
     enable_ocr = st.checkbox("Enable OCR for scanned pages", value=True)
     ocr_language = st.text_input("OCR language (Tesseract)", value="eng")
     enable_visual_analysis = st.checkbox("Enable visual analysis (vision model)", value=True)
-    max_visuals = st.slider(
-        "Max visuals to analyze",
-        min_value=1,
-        max_value=30,
-        value=12,
-        help="Prioritizes visuals with caption matches first.",
-    )
-    vision_model = st.text_input("Vision model", value=DEFAULT_VISION_MODEL)
+    vision_model = DEFAULT_VISION_MODEL
     pdf_password = st.text_input("PDF password (if encrypted)", type="password")
     st.markdown("---")
-    st.caption("Uses Streamlit secrets key `OPENAI_API_KEY` for OpenAI access.")
     st.markdown("**Tip:** If your PDFs are scanned images, text extraction may fail. OCR can recover text.")
 
 if "examiner1_report" not in st.session_state:
@@ -938,6 +930,8 @@ if "ia_extracted_visuals" not in st.session_state:
     st.session_state.ia_extracted_visuals = []
 if "ia_visual_analysis" not in st.session_state:
     st.session_state.ia_visual_analysis = ""
+if "visuals_confirmed_upload_key" not in st.session_state:
+    st.session_state.visuals_confirmed_upload_key = None
 if "criteria_text" not in st.session_state:
     st.session_state.criteria_text = ""
 if "last_upload_key" not in st.session_state:
@@ -976,7 +970,6 @@ def ensure_documents(
     use_ocr: bool,
     ocr_language_setting: str,
     enable_visual_analysis: bool,
-    max_visuals: int,
     pdf_password: str | None,
 ) -> None:
     ia_bytes = ia_upload.getvalue()
@@ -992,7 +985,6 @@ def ensure_documents(
         model,
         vision_model,
         enable_visual_analysis,
-        max_visuals,
         password_fingerprint,
     )
     if st.session_state.doc_cache_key == cache_key:
@@ -1051,13 +1043,25 @@ def ensure_documents(
     visual_analysis_results: list[dict[str, object]] = []
     visual_analysis_error: dict[str, str] | None = None
     if enable_visual_analysis and visuals_with_captions:
+        confirmation_key = (ia_upload.name, sha256_hex)
+        if (
+            len(visuals_with_captions) >= VISUAL_CONFIRM_THRESHOLD
+            and st.session_state.visuals_confirmed_upload_key != confirmation_key
+        ):
+            st.warning(
+                f"This IA contains {len(visuals_with_captions)} visuals. "
+                "Processing them all can take longer and increase costs."
+            )
+            if st.button("Confirm visual analysis for this upload"):
+                st.session_state.visuals_confirmed_upload_key = confirmation_key
+                st.success("Confirmation saved. Run the analysis again to proceed.")
+            st.stop()
         with st.spinner("Analyzing visuals (vision model)..."):
             try:
                 visual_analysis_results = analyze_visuals(
                     client,
                     model=vision_model,
                     visuals=visuals_with_captions,
-                    max_visuals=max_visuals,
                 )
             except LLMError as exc:
                 visual_analysis_error = {
@@ -1122,7 +1126,7 @@ def ensure_documents(
             "visual_analysis": {
                 "enabled": enable_visual_analysis,
                 "model": vision_model,
-                "max_visuals": max_visuals,
+                "requested_count": len(visuals_with_captions),
                 "results_count": len(visual_analysis_results),
                 "error": visual_analysis_error,
             },
@@ -1165,6 +1169,7 @@ if ia_file:
     if st.session_state.last_upload_key != current_upload_key:
         reset_reports()
         st.session_state.last_upload_key = current_upload_key
+        st.session_state.visuals_confirmed_upload_key = None
 
 reports_ready = bool(st.session_state.examiner1_report.strip()) and bool(
     st.session_state.examiner2_report.strip()
@@ -1219,7 +1224,6 @@ if selected_action:
             use_ocr=enable_ocr,
             ocr_language_setting=ocr_language,
             enable_visual_analysis=enable_visual_analysis,
-            max_visuals=max_visuals,
             pdf_password=pdf_password,
         )
     except LLMError as exc:
