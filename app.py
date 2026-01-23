@@ -31,7 +31,6 @@ CRITERIA_PATH = Path(__file__).resolve().parent / "criteria" / "ib_phy_ia_criter
 MAX_PASSWORD_ATTEMPTS = 5
 PASSWORD_ATTEMPT_WINDOW_SECONDS = 300
 OCR_CONFIDENCE_WARNING_THRESHOLD = 60.0
-VISUAL_CONFIRM_THRESHOLD = 25
 
 # -------------------------
 # Prompt templates (loaded from files)
@@ -930,8 +929,6 @@ if "ia_extracted_visuals" not in st.session_state:
     st.session_state.ia_extracted_visuals = []
 if "ia_visual_analysis" not in st.session_state:
     st.session_state.ia_visual_analysis = ""
-if "visuals_confirmed_upload_key" not in st.session_state:
-    st.session_state.visuals_confirmed_upload_key = None
 if "pending_action" not in st.session_state:
     st.session_state.pending_action = None
 if "criteria_text" not in st.session_state:
@@ -1046,20 +1043,6 @@ def ensure_documents(
     visual_analysis_results: list[dict[str, object]] = []
     visual_analysis_error: dict[str, str] | None = None
     if enable_visual_analysis and visuals_with_captions:
-        confirmation_key = (ia_upload.name, sha256_hex)
-        if (
-            len(visuals_with_captions) >= VISUAL_CONFIRM_THRESHOLD
-            and st.session_state.visuals_confirmed_upload_key != confirmation_key
-        ):
-            st.warning(
-                f"This IA contains {len(visuals_with_captions)} visuals. "
-                "Processing them all can take longer and increase costs."
-            )
-            confirmed_now = st.button("Confirm visual analysis for this upload")
-            if confirmed_now:
-                st.session_state.visuals_confirmed_upload_key = confirmation_key
-            else:
-                st.stop()
         with st.spinner("Analyzing visuals (vision model)..."):
             try:
                 visual_analysis_results = analyze_visuals(
@@ -1173,7 +1156,6 @@ if ia_file:
     if st.session_state.last_upload_key != current_upload_key:
         reset_reports()
         st.session_state.last_upload_key = current_upload_key
-        st.session_state.visuals_confirmed_upload_key = None
 
 reports_ready = bool(st.session_state.examiner1_report.strip()) and bool(
     st.session_state.examiner2_report.strip()
