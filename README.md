@@ -45,3 +45,6 @@ Streamlit app that marks IB DP Physics Internal Assessments using the official r
 - **PDF extraction errors**: ensure Poppler is installed and accessible.
 - **Rate limits/timeouts**: retry after a short delay.
 - **Encrypted PDFs**: provide the password in the sidebar if prompted.
+
+## Visual coverage roadmap
+To avoid unfair marks when PDFs contain photos, diagrams, graphs, or tables, see `tasks.md` for the planned extraction and visual-understanding upgrades that will surface unread content explicitly.
