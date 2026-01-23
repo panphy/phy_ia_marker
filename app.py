@@ -932,6 +932,8 @@ if "ia_visual_analysis" not in st.session_state:
     st.session_state.ia_visual_analysis = ""
 if "visuals_confirmed_upload_key" not in st.session_state:
     st.session_state.visuals_confirmed_upload_key = None
+if "pending_action" not in st.session_state:
+    st.session_state.pending_action = None
 if "criteria_text" not in st.session_state:
     st.session_state.criteria_text = ""
 if "last_upload_key" not in st.session_state:
@@ -949,6 +951,7 @@ def reset_reports() -> None:
     st.session_state.ia_coverage_warnings = []
     st.session_state.ia_extracted_visuals = []
     st.session_state.ia_visual_analysis = ""
+    st.session_state.pending_action = None
 
 
 def record_llm_error(context: str, error: LLMError) -> None:
@@ -1210,10 +1213,16 @@ elif run_moderator:
     selected_action = "moderator"
 
 if selected_action:
+    st.session_state.pending_action = selected_action
+elif st.session_state.pending_action:
+    selected_action = st.session_state.pending_action
+
+if selected_action:
     try:
         client = get_openai_client()
     except Exception as e:
         st.error(str(e))
+        st.session_state.pending_action = None
         st.stop()
 
     try:
@@ -1230,6 +1239,7 @@ if selected_action:
     except LLMError as exc:
         record_llm_error("prepare_documents", exc)
         st.error(exc.user_message)
+        st.session_state.pending_action = None
         st.stop()
 
     criteria_ready = AIResult(text=st.session_state.criteria_text, used_digest=False)
@@ -1259,6 +1269,7 @@ if selected_action:
             except LLMError as exc:
                 record_llm_error("examiner1_report", exc)
                 st.error(exc.user_message)
+                st.session_state.pending_action = None
             else:
                 st.session_state.examiner1_report = examiner_report
                 if not report_has_expected_citations(examiner_report, ia_ready.used_digest):
@@ -1266,6 +1277,7 @@ if selected_action:
                         "Examiner 1 report may be missing expected citation markers. "
                         "Check that evidence references include page or digest range labels."
                     )
+                st.session_state.pending_action = None
                 st.success("Examiner 1 report generated.")
                 st.rerun()
 
@@ -1292,6 +1304,7 @@ if selected_action:
             except LLMError as exc:
                 record_llm_error("examiner2_report", exc)
                 st.error(exc.user_message)
+                st.session_state.pending_action = None
             else:
                 st.session_state.examiner2_report = examiner_report
                 if not report_has_expected_citations(examiner_report, ia_ready.used_digest):
@@ -1299,6 +1312,7 @@ if selected_action:
                         "Examiner 2 report may be missing expected citation markers. "
                         "Check that evidence references include page or digest range labels."
                     )
+                st.session_state.pending_action = None
                 st.success("Examiner 2 report generated.")
                 st.rerun()
 
@@ -1328,6 +1342,7 @@ if selected_action:
             except LLMError as exc:
                 record_llm_error("moderator_report", exc)
                 st.error(exc.user_message)
+                st.session_state.pending_action = None
             else:
                 st.session_state.moderator_report = moderator_report
                 if not report_has_expected_citations(moderator_report, ia_ready.used_digest):
@@ -1335,6 +1350,7 @@ if selected_action:
                         "Moderator report may be missing expected citation markers. "
                         "Check that evidence references include page or digest range labels."
                     )
+                st.session_state.pending_action = None
                 st.success("Moderator report generated.")
 
 # -------------------------
