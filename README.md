@@ -1,6 +1,6 @@
 # IB DP Physics IA Marker
 
-Streamlit app that marks IB DP Physics Internal Assessments using the official rubric. It extracts text from a student IA PDF (with optional OCR), injects the rubric and IA into structured prompts, and produces examiner/moderator markdown reports.
+Streamlit app that marks IB DP Physics Internal Assessments (first assessment 2025) using the official rubric. It extracts text from a student IA PDF (with optional OCR), injects the rubric and IA into structured prompts, and produces examiner/moderator markdown reports.
 
 ## Features
 - **Rubric-driven marking** for Research design, Data analysis, Conclusion, and Evaluation.
