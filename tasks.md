@@ -12,12 +12,12 @@ Ensure the system can account for **all content in PDFs** (text, photos, diagram
 - [x] Extract embedded images from PDFs (vector graphics still pending).
 - [x] Link extracted visuals to nearby captions/figure numbers when possible.
 - [x] Store extracted visuals for downstream analysis.
-- [ ] Extract vector graphics (non-image drawings) from PDFs.
+- [x] Extract vector graphics (non-image drawings) from PDFs.
 
 ## Milestone 3: Visual understanding pipeline
-- [ ] Add a vision-capable model pass for diagrams/photos.
-- [ ] Add chart understanding (axes, trends, fit line, key values).
-- [ ] Add table structure extraction (rows/columns/units/uncertainties).
+- [x] Add a vision-capable model pass for diagrams/photos.
+- [x] Add chart understanding (axes, trends, fit line, key values).
+- [x] Add table structure extraction (rows/columns/units/uncertainties).
 
 ## Milestone 4: Prompt + rubric integration
 - [x] Extend IA prompts to include visual summaries and tables/graphs outputs.

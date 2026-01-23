@@ -19,6 +19,11 @@ You are an **IB DP Physics Internal Assessment (IA) examiner** with **many years
 [COVERAGE_END]
 - Use this to highlight missing or unreadable evidence; do not invent details.
 
+## Visual analysis summary (vision model, if available)
+[VISUAL_ANALYSIS_START]
+{visual_analysis}
+[VISUAL_ANALYSIS_END]
+
 # Your task
 
 ## Distinct emphasis (while staying rubric-locked)
