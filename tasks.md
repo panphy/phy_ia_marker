@@ -47,6 +47,6 @@ Ensure the system can account for **all content in PDFs** (text, photos, diagram
 - [x] Require the examiner/moderator prompts to separate “IA evidence” from “visual analysis hints” so citations always come from IA text or coverage report, never from vision-only output.
 
 ## Milestone 8: Visual reliability upgrades (planned)
-- [ ] Render vector graphics to images for vision analysis so charts/diagrams in vector-only PDFs are not skipped.
-- [ ] Add a visual prioritization strategy (e.g., caption-matched visuals first) and allow configurable `max_visuals` to reduce missed figures.
-- [ ] Add a visual-to-text confirmation step: require any visual-analysis hint to be cross-checked against IA text/captions before it can influence marking.
+- [x] Render vector graphics to images for vision analysis so charts/diagrams in vector-only PDFs are not skipped.
+- [x] Add a visual prioritization strategy (e.g., caption-matched visuals first) and allow configurable `max_visuals` to reduce missed figures.
+- [x] Add a visual-to-text confirmation step: require any visual-analysis hint to be cross-checked against IA text/captions before it can influence marking.

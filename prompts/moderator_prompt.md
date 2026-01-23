@@ -50,6 +50,7 @@ For each criterion:
 - If an examiner claim lacks evidence in the IA text, mark it as “unverified” and do not rely on it for the final mark.
 - When affirming or rejecting examiner claims, cite the relevant `--- Page N ---` marker from the IA text.
 Separate **IA/coverage evidence (cited)** from **visual analysis hints (uncited)**. Citations must come only from the IA text or coverage report; visual-analysis-only content is never evidence.
+Any **visual analysis hint** must be cross-checked against IA text or captions before it can influence marking. If it cannot be confirmed, label it as unverified and do not use it for marks.
 {digest_citation_guidance}
 
 ## B) Evidence and reasoning

@@ -611,24 +611,47 @@ def analyze_visuals(
     max_visuals: int = 12,
 ) -> list[dict[str, object]]:
     results: list[dict[str, object]] = []
-    for visual in visuals[:max_visuals]:
-        if visual.kind != "image":
+    prioritized_visuals: list[ExtractedVisual] = []
+    uncaptioned_visuals: list[ExtractedVisual] = []
+    for visual in visuals:
+        if getattr(visual, "captions", ()):
+            prioritized_visuals.append(visual)
+        else:
+            uncaptioned_visuals.append(visual)
+    selected_visuals = (prioritized_visuals + uncaptioned_visuals)[:max_visuals]
+    for visual in selected_visuals:
+        if visual.kind != "image" and visual.kind != "vector":
             results.append(
                 {
                     "page_number": visual.page_number,
                     "name": visual.name,
                     "kind": visual.kind,
-                    "analysis": "Vector graphic detected but not rendered for vision analysis.",
+                    "analysis": "Visual type not supported for vision analysis.",
                 }
             )
             continue
+        image_bytes = visual.data
+        image_format = visual.image_format
+        if visual.kind == "vector":
+            if not visual.rasterized_data:
+                results.append(
+                    {
+                        "page_number": visual.page_number,
+                        "name": visual.name,
+                        "kind": visual.kind,
+                        "analysis": "Vector graphic detected but not rendered for vision analysis.",
+                    }
+                )
+                continue
+            image_bytes = visual.rasterized_data
+            image_format = visual.rasterized_format or "png"
         prompt = build_visual_analysis_prompt(visual)
         analysis = call_vision_llm(
             client,
             model=model,
             prompt=prompt,
-            image_bytes=visual.data,
-            image_format=visual.image_format,
+            image_bytes=image_bytes,
+            image_format=image_format,
         )
         sanitized_analysis, format_warning = sanitize_visual_analysis_output(analysis or "")
         results.append(
@@ -878,6 +901,13 @@ with st.sidebar:
     enable_ocr = st.checkbox("Enable OCR for scanned pages", value=True)
     ocr_language = st.text_input("OCR language (Tesseract)", value="eng")
     enable_visual_analysis = st.checkbox("Enable visual analysis (vision model)", value=True)
+    max_visuals = st.slider(
+        "Max visuals to analyze",
+        min_value=1,
+        max_value=30,
+        value=12,
+        help="Prioritizes visuals with caption matches first.",
+    )
     vision_model = st.text_input("Vision model", value=DEFAULT_VISION_MODEL)
     pdf_password = st.text_input("PDF password (if encrypted)", type="password")
     st.markdown("---")
@@ -946,6 +976,7 @@ def ensure_documents(
     use_ocr: bool,
     ocr_language_setting: str,
     enable_visual_analysis: bool,
+    max_visuals: int,
     pdf_password: str | None,
 ) -> None:
     ia_bytes = ia_upload.getvalue()
@@ -961,6 +992,7 @@ def ensure_documents(
         model,
         vision_model,
         enable_visual_analysis,
+        max_visuals,
         password_fingerprint,
     )
     if st.session_state.doc_cache_key == cache_key:
@@ -1004,6 +1036,8 @@ def ensure_documents(
             data=visual.data,
             captions=tuple(page_captions.get(visual.page_number, [])),
             kind=visual.kind,
+            rasterized_data=visual.rasterized_data,
+            rasterized_format=visual.rasterized_format,
         )
         for visual in ia_visuals
     ]
@@ -1023,6 +1057,7 @@ def ensure_documents(
                     client,
                     model=vision_model,
                     visuals=visuals_with_captions,
+                    max_visuals=max_visuals,
                 )
             except LLMError as exc:
                 visual_analysis_error = {
@@ -1077,6 +1112,8 @@ def ensure_documents(
                     "width": visual.width,
                     "height": visual.height,
                     "byte_size": len(visual.data),
+                    "rasterized_format": visual.rasterized_format,
+                    "rasterized_byte_size": len(visual.rasterized_data or b""),
                     "captions": list(visual.captions),
                     "kind": visual.kind,
                 }
@@ -1085,6 +1122,7 @@ def ensure_documents(
             "visual_analysis": {
                 "enabled": enable_visual_analysis,
                 "model": vision_model,
+                "max_visuals": max_visuals,
                 "results_count": len(visual_analysis_results),
                 "error": visual_analysis_error,
             },
@@ -1181,6 +1219,7 @@ if selected_action:
             use_ocr=enable_ocr,
             ocr_language_setting=ocr_language,
             enable_visual_analysis=enable_visual_analysis,
+            max_visuals=max_visuals,
             pdf_password=pdf_password,
         )
     except LLMError as exc:
