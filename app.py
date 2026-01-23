@@ -22,7 +22,7 @@ from pdf_utils import (
 # -------------------------
 APP_TITLE = "IB DP Physics IA Marker"
 DEFAULT_MODEL = "gpt-5-mini"
-DEFAULT_VISION_MODEL = "gpt-4.1-mini"
+DEFAULT_VISION_MODEL = "gpt-5-mini"
 MAX_RAW_CHARS_BEFORE_DIGEST = 180_000  # if docs are huge, make a structured digest first
 DIGEST_TARGET_CHARS = 70_000           # approximate size of digest text
 DIGEST_CHUNK_TARGET_CHARS = 30_000     # chunk size for per-chunk summaries
