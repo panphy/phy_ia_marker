@@ -885,6 +885,17 @@ def require_password() -> None:
 
 require_password()
 
+if "is_processing" not in st.session_state:
+    st.session_state.is_processing = False
+if "processing_error" not in st.session_state:
+    st.session_state.processing_error = None
+
+inputs_disabled = st.session_state.is_processing
+
+if st.session_state.processing_error:
+    st.error(st.session_state.processing_error)
+    st.session_state.processing_error = None
+
 with st.sidebar:
     st.subheader("Settings")
     model = DEFAULT_MODEL
@@ -897,11 +908,15 @@ with st.sidebar:
     #     disabled=True,
     #     help="This app is set to store=false by default in code. Toggle in code if you want storage.",
     # )
-    enable_ocr = st.checkbox("Enable OCR for scanned pages", value=True)
-    ocr_language = st.text_input("OCR language (Tesseract)", value="eng")
-    enable_visual_analysis = st.checkbox("Enable visual analysis (vision model)", value=True)
+    enable_ocr = st.checkbox("Enable OCR for scanned pages", value=True, disabled=inputs_disabled)
+    ocr_language = st.text_input("OCR language (Tesseract)", value="eng", disabled=inputs_disabled)
+    enable_visual_analysis = st.checkbox(
+        "Enable visual analysis (vision model)", value=True, disabled=inputs_disabled
+    )
     vision_model = DEFAULT_VISION_MODEL
-    pdf_password = st.text_input("PDF password (if encrypted)", type="password")
+    pdf_password = st.text_input(
+        "PDF password (if encrypted)", type="password", disabled=inputs_disabled
+    )
     st.markdown("---")
     st.markdown("**Tip:** If your PDFs are scanned images, text extraction may fail. OCR can recover text.")
 
@@ -1146,7 +1161,9 @@ if has_existing_reports:
         "Uploading a new IA PDF will clear all existing reports. Download any reports you need first."
     )
 
-ia_file = st.file_uploader("Upload student IA PDF", type=["pdf"], key="ia_pdf")
+ia_file = st.file_uploader(
+    "Upload student IA PDF", type=["pdf"], key="ia_pdf", disabled=inputs_disabled
+)
 if ia_file:
     ia_bytes = ia_file.getvalue()
     current_upload_key = (
@@ -1166,7 +1183,7 @@ with columns[0]:
     run_examiner1 = st.button(
         "Mark with Examiner 1",
         type="primary",
-        disabled=not ia_file,
+        disabled=inputs_disabled or not ia_file,
         help="Strict rubric-first examiner who assigns marks based on evidence.",
         use_container_width=True,
     )
@@ -1174,7 +1191,7 @@ with columns[1]:
     run_examiner2 = st.button(
         "Mark with Examiner 2",
         type="primary",
-        disabled=not ia_file,
+        disabled=inputs_disabled or not ia_file,
         help="Equally experienced examiner who assigns marks based on evidence.",
         use_container_width=True,
     )
@@ -1182,7 +1199,7 @@ with columns[2]:
     run_moderator = st.button(
         "Mark with Moderator",
         type="primary",
-        disabled=not ia_file or not reports_ready,
+        disabled=inputs_disabled or not ia_file or not reports_ready,
         help="Chief examiner who adjudicates based on the IA, rubric, and both examiner reports.",
         use_container_width=True,
     )
@@ -1196,16 +1213,21 @@ elif run_moderator:
 
 if selected_action:
     st.session_state.pending_action = selected_action
-elif st.session_state.pending_action:
-    selected_action = st.session_state.pending_action
+    if not st.session_state.is_processing:
+        st.session_state.is_processing = True
+        st.rerun()
 
-if selected_action:
+processing_action = st.session_state.pending_action if st.session_state.is_processing else None
+
+if processing_action:
+    st.session_state.is_processing = True
     try:
         client = get_openai_client()
-    except Exception as e:
-        st.error(str(e))
+    except Exception as exc:
+        st.session_state.processing_error = str(exc)
         st.session_state.pending_action = None
-        st.stop()
+        st.session_state.is_processing = False
+        st.rerun()
 
     try:
         ensure_documents(
@@ -1220,15 +1242,16 @@ if selected_action:
         )
     except LLMError as exc:
         record_llm_error("prepare_documents", exc)
-        st.error(exc.user_message)
+        st.session_state.processing_error = exc.user_message
         st.session_state.pending_action = None
-        st.stop()
+        st.session_state.is_processing = False
+        st.rerun()
 
     criteria_ready = AIResult(text=st.session_state.criteria_text, used_digest=False)
     ia_ready = AIResult(text=st.session_state.ia_ready_text, used_digest=st.session_state.ia_used_digest)
     digest_citation_guidance = build_digest_citation_guidance(st.session_state.ia_used_digest)
 
-    if selected_action == "examiner1":
+    if processing_action == "examiner1":
         with st.spinner("Generating Examiner 1 report..."):
             examiner_input = EXAMINER1_PROMPT.format(
                 rubric_text=criteria_ready.text,
@@ -1250,8 +1273,10 @@ if selected_action:
                 )
             except LLMError as exc:
                 record_llm_error("examiner1_report", exc)
-                st.error(exc.user_message)
+                st.session_state.processing_error = exc.user_message
                 st.session_state.pending_action = None
+                st.session_state.is_processing = False
+                st.rerun()
             else:
                 st.session_state.examiner1_report = examiner_report
                 if not report_has_expected_citations(examiner_report, ia_ready.used_digest):
@@ -1260,10 +1285,11 @@ if selected_action:
                         "Check that evidence references include page or digest range labels."
                     )
                 st.session_state.pending_action = None
+                st.session_state.is_processing = False
                 st.success("Examiner 1 report generated.")
                 st.rerun()
 
-    if selected_action == "examiner2":
+    if processing_action == "examiner2":
         with st.spinner("Generating Examiner 2 report..."):
             examiner_input = EXAMINER2_PROMPT.format(
                 rubric_text=criteria_ready.text,
@@ -1285,8 +1311,10 @@ if selected_action:
                 )
             except LLMError as exc:
                 record_llm_error("examiner2_report", exc)
-                st.error(exc.user_message)
+                st.session_state.processing_error = exc.user_message
                 st.session_state.pending_action = None
+                st.session_state.is_processing = False
+                st.rerun()
             else:
                 st.session_state.examiner2_report = examiner_report
                 if not report_has_expected_citations(examiner_report, ia_ready.used_digest):
@@ -1295,10 +1323,11 @@ if selected_action:
                         "Check that evidence references include page or digest range labels."
                     )
                 st.session_state.pending_action = None
+                st.session_state.is_processing = False
                 st.success("Examiner 2 report generated.")
                 st.rerun()
 
-    if selected_action == "moderator":
+    if processing_action == "moderator":
         with st.spinner("Generating Moderator report..."):
             moderator_input = MODERATOR_PROMPT.format(
                 rubric_text=criteria_ready.text,
@@ -1323,8 +1352,10 @@ if selected_action:
                 )
             except LLMError as exc:
                 record_llm_error("moderator_report", exc)
-                st.error(exc.user_message)
+                st.session_state.processing_error = exc.user_message
                 st.session_state.pending_action = None
+                st.session_state.is_processing = False
+                st.rerun()
             else:
                 st.session_state.moderator_report = moderator_report
                 if not report_has_expected_citations(moderator_report, ia_ready.used_digest):
@@ -1333,7 +1364,9 @@ if selected_action:
                         "Check that evidence references include page or digest range labels."
                     )
                 st.session_state.pending_action = None
+                st.session_state.is_processing = False
                 st.success("Moderator report generated.")
+                st.rerun()
 
 # -------------------------
 # Coverage summary
@@ -1380,7 +1413,7 @@ if (
             data=st.session_state.examiner1_report,
             file_name="examiner1_report.md",
             mime="text/markdown",
-            disabled=not st.session_state.examiner1_report,
+            disabled=inputs_disabled or not st.session_state.examiner1_report,
         )
         st.markdown(st.session_state.examiner1_report or "_No report yet._")
 
@@ -1390,7 +1423,7 @@ if (
             data=st.session_state.examiner2_report,
             file_name="examiner2_report.md",
             mime="text/markdown",
-            disabled=not st.session_state.examiner2_report,
+            disabled=inputs_disabled or not st.session_state.examiner2_report,
         )
         st.markdown(st.session_state.examiner2_report or "_No report yet._")
 
@@ -1400,7 +1433,7 @@ if (
             data=st.session_state.moderator_report,
             file_name="moderator_report.md",
             mime="text/markdown",
-            disabled=not st.session_state.moderator_report,
+            disabled=inputs_disabled or not st.session_state.moderator_report,
         )
         st.markdown(st.session_state.moderator_report or "_No report yet._")
 
