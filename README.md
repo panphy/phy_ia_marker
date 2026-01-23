@@ -50,7 +50,7 @@ Streamlit app that marks IB DP Physics Internal Assessments (first assessment 20
 5. **Marking safeguards**: prompts require that **only IA text or the coverage report can be cited as evidence**. Visual analysis is treated as **uncited hints** and must remain separate from evidence-backed claims.
 
 **Reliability notes**
-- Visual analysis is capped to a limited number of visuals and **does not yet render vector graphics** for vision, so some charts/diagrams may be summarized only via text references.
+- Visual analysis does not yet render vector graphics for vision, so some charts/diagrams may be summarized only via text references.
 - OCR confidence warnings and “no-text” page flags are intended to prevent over-reliance on unreadable content.
 - For planned upgrades (vector rendering, visual prioritization, and cross-checking visual hints against IA text), see `tasks.md`.
 
