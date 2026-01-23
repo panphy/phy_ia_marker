@@ -48,6 +48,7 @@ Evidence can include:
 - extracted or referenced visuals (note when visuals are present but unreadable or missing context)
 
 You do **not** need to literally quote every time, but you must reference **specific locations** or items. Use the `--- Page N ---` markers as the **primary location** for every citation. Only cite figure/table/section labels if they appear **verbatim** in the extracted text. Every evidence reference **must include a page/section/figure/table identifier** (e.g., “Page 6”, “Page 6, Fig. 2”, “Page 4, Graph: V vs I”). If the location is not labeled in the IA, write **“location not labeled”**.
+Separate **IA/coverage evidence (cited)** from **visual analysis hints (uncited)**. Citations must come only from the IA text or coverage report; visual-analysis-only content is never evidence.
 {digest_citation_guidance}
 
 ## C) Data processing checks (global)
@@ -77,6 +78,7 @@ For each criterion:
 - **Rubric basis (descriptor):** “…” (from rubric)
 - **Evidence from IA (text/figure/table/missing):**
   - Provide as many evidence bullets as needed. Each bullet must include type, location, what it shows/misses, and why it matches (or fails to match) the descriptor.
+  - If you use the visual analysis summary, add separate bullets labeled **“Visual analysis hint (uncited)”** and do not treat them as evidence.
 - **Descriptor-coverage check (for chosen descriptor clauses):**
   - List each key clause and mark as evidenced or not evidenced with location.
 - **Data processing checks (units/uncertainty/calculations/fit validity):**

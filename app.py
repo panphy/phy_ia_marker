@@ -36,10 +36,43 @@ OCR_CONFIDENCE_WARNING_THRESHOLD = 60.0
 # Prompt templates (loaded from files)
 # -------------------------
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+PROMPT_QA_MARKER = "# Prompt QA resolution"
+PROMPT_QA_RULES = [
+    {
+        "name": "visual_analysis_citation_separation",
+        "requires": [
+            "Visual analysis summary",
+            "Visual summary + tables/graphs inventory",
+        ],
+        "guidance": (
+            "- Evidence citations must come only from the IA text or coverage report.\n"
+            "- If you reference visual analysis, label it as a **visual analysis hint (uncited)** and keep it"
+            " separate from IA/coverage evidence.\n"
+            "- Do not treat visual-analysis-only content as verified evidence."
+        ),
+    }
+]
+
+
+def apply_prompt_qa(prompt: str) -> str:
+    if PROMPT_QA_MARKER in prompt:
+        return prompt
+    qa_notes: list[str] = []
+    for rule in PROMPT_QA_RULES:
+        if all(requirement in prompt for requirement in rule["requires"]):
+            qa_notes.append(rule["guidance"])
+    if not qa_notes:
+        return prompt
+    qa_block = "\n".join(
+        [PROMPT_QA_MARKER, "Resolve any internal contradictions with the guidance below:"]
+        + qa_notes
+    )
+    return f"{prompt}\n\n{qa_block}"
 
 
 def load_prompt(filename: str) -> str:
-    return (PROMPTS_DIR / filename).read_text(encoding="utf-8")
+    prompt = (PROMPTS_DIR / filename).read_text(encoding="utf-8")
+    return apply_prompt_qa(prompt)
 
 
 EXAMINER1_PROMPT = load_prompt("examiner1_prompt.md")
