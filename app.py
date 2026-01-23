@@ -1052,10 +1052,11 @@ def ensure_documents(
                 f"This IA contains {len(visuals_with_captions)} visuals. "
                 "Processing them all can take longer and increase costs."
             )
-            if st.button("Confirm visual analysis for this upload"):
+            confirmed_now = st.button("Confirm visual analysis for this upload")
+            if confirmed_now:
                 st.session_state.visuals_confirmed_upload_key = confirmation_key
-                st.success("Confirmation saved. Run the analysis again to proceed.")
-            st.stop()
+            else:
+                st.stop()
         with st.spinner("Analyzing visuals (vision model)..."):
             try:
                 visual_analysis_results = analyze_visuals(
