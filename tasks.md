@@ -20,7 +20,7 @@ Ensure the system can account for **all content in PDFs** (text, photos, diagram
 - [ ] Add table structure extraction (rows/columns/units/uncertainties).
 
 ## Milestone 4: Prompt + rubric integration
-- [ ] Extend IA prompts to include visual summaries and tables/graphs outputs.
+- [x] Extend IA prompts to include visual summaries and tables/graphs outputs.
 - [x] Require explicit mention when evidence is missing or unreadable.
 - [x] Add a final “coverage report” section for the moderator.
 

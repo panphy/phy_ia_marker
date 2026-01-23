@@ -37,6 +37,7 @@ Evidence can include:
 - graphs/diagrams/tables (describe what is shown and where, e.g., “Figure 2”, “Table 1”, “Graph: V vs I”)
 - missing elements (explicitly state what is absent)
 - unreadable or missing pages/figures noted in the coverage report
+- extracted or referenced visuals (note when visuals are present but unreadable or missing context)
 
 You do **not** need to literally quote every time, but you must reference **specific locations** or items. Use the `--- Page N ---` markers as the **primary location** for every citation. Only cite figure/table/section labels if they appear **verbatim** in the extracted text. Every evidence reference **must include a page/section/figure/table identifier** (e.g., “Page 6”, “Page 6, Fig. 2”, “Page 4, Graph: V vs I”). If the location is not labeled in the IA, write **“location not labeled”**.
 {digest_citation_guidance}
@@ -84,7 +85,12 @@ For each criterion:
   - No bullet-list "table" substitutes.
 - 5–10 line moderator-style summary.
 
-### 3) Red flags / academic integrity (only if evidence appears)
+### 3) Visual summary + tables/graphs inventory (required)
+- Bullet list of all figures/graphs/tables referenced in the IA text or coverage report.
+- For each item: give location, what it appears to show, and whether it was readable/extractable.
+- If visuals are mentioned but not readable or missing, say so explicitly.
+
+### 4) Red flags / academic integrity (only if evidence appears)
 List concerns as concerns (not accusations) with the triggering evidence. Label each item as **“possible concern”** or **“confirmed issue”** and include exact evidence locations; do not infer intent.
 
 # Rules
