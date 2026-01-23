@@ -51,9 +51,22 @@ Ensure the system can account for **all content in PDFs** (text, photos, diagram
 - [x] Add a visual prioritization strategy (e.g., caption-matched visuals first) and allow configurable `max_visuals` to reduce missed figures.
 - [x] Add a visual-to-text confirmation step: require any visual-analysis hint to be cross-checked against IA text/captions before it can influence marking.
 
+## Completed highlights (summary)
+- Extraction coverage diagnostics with OCR confidence warnings and UI surface.
+- Visual extraction (raster + vector), caption linking, and vision-model summaries.
+- Digesting workflow with chunk-aware citation guidance and prompt QA checks.
+- Prompt safeguards against prompt injection and evidence fabrication.
+- Tests covering mixed-content PDFs, digest citation warnings, and prompt QA insertion.
+
 ## Follow-up tasks from review (codebase + prompt QA)
 - [x] Fix `report_has_expected_citations` to accept `--- Page N ---` style markers even when a digest is used, since digest outputs can preserve page markers and currently trigger false warnings.
 - [x] When chunking oversized pages in `chunk_pages`, re-inject the page header (`--- Page N ---`) for every sub-chunk so digest summaries always include page identifiers.
 - [x] Add a limit + sampling strategy for visual analysis (e.g., `max_visuals`, sample uncaptioned visuals) to avoid oversized vision calls on large PDFs while still capturing key evidence.
 - [x] Tighten prompt instructions to reduce redundancy across examiner prompts and explicitly define the minimal citation format (e.g., `Page N` vs `Pages N-M`) to improve model compliance.
 - [x] Add tests that cover digest citation warnings, oversized single-page chunking behavior, and prompt QA block insertion to catch regressions.
+
+## Follow-up tasks from review (bugs + improvements)
+- [ ] Fix image-count diagnostics to use the extracted image list length (the `page.images` property can be non-sized, causing `image_count=0` even when images exist).
+- [ ] Add a regression test that ensures image-count diagnostics match extracted visuals for image-only PDFs.
+- [ ] Capture figure/table labels that include suffixes (e.g., "Figure 2a") so unresolved-label reporting is more accurate.
+- [ ] Add optional DPI control or caching for vector rasterization to avoid repeated high-cost renders on large PDFs.
