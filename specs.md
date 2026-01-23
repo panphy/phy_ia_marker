@@ -5,6 +5,7 @@
 - **Primary entrypoint**: `app.py` (likely the main CLI/server runner).
 - **Supporting modules**: `pdf_utils.py` for PDF/text handling; `tests/` for validation.
 - **Coverage goal**: Ensure the system can account for all PDF content (text + visuals) and explicitly flag any unread content to avoid unfair marking.
+- **Task tracking**: `tasks.md` summarizes completed work and lists pending follow-ups.
 
 ## Repository layout
 - `app.py`: top-level application wiring, orchestration, and I/O.
