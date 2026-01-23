@@ -25,6 +25,6 @@ Ensure the system can account for **all content in PDFs** (text, photos, diagram
 - [x] Add a final “coverage report” section for the moderator.
 
 ## Milestone 5: Validation and UX
-- [ ] Add tests for mixed-content PDFs (text + images + tables).
+- [x] Add tests for mixed-content PDFs (text + images + tables).
 - [x] Provide a user-facing “content coverage” summary with actionable guidance.
 - [x] Add an option to upload higher-quality scans if coverage is low.
