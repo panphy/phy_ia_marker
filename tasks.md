@@ -9,9 +9,10 @@ Ensure the system can account for **all content in PDFs** (text, photos, diagram
 - [x] Record missing labels or unresolved figure/table references.
 
 ## Milestone 2: Image + figure extraction
-- [ ] Extract embedded images and vector graphics from PDFs.
-- [ ] Link extracted visuals to nearby captions/figure numbers when possible.
-- [ ] Store extracted visuals for downstream analysis.
+- [x] Extract embedded images from PDFs (vector graphics still pending).
+- [x] Link extracted visuals to nearby captions/figure numbers when possible.
+- [x] Store extracted visuals for downstream analysis.
+- [ ] Extract vector graphics (non-image drawings) from PDFs.
 
 ## Milestone 3: Visual understanding pipeline
 - [ ] Add a vision-capable model pass for diagrams/photos.

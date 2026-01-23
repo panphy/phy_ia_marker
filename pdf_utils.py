@@ -19,6 +19,17 @@ class PageExtractionDiagnostic:
     text_length: int
 
 
+@dataclass(frozen=True)
+class ExtractedVisual:
+    page_number: int
+    name: str
+    image_format: str | None
+    width: int | None
+    height: int | None
+    data: bytes
+    captions: tuple[str, ...] = ()
+
+
 @dataclass
 class PdfExtractionError(Exception):
     user_message: str
@@ -65,13 +76,57 @@ def count_page_images(page: object) -> int:
         return 0
 
 
+def extract_page_images(page: object, page_number: int) -> list[ExtractedVisual]:
+    try:
+        images = list(page.images)
+    except Exception:
+        return []
+
+    extracted: list[ExtractedVisual] = []
+    for index, image in enumerate(images, start=1):
+        name = getattr(image, "name", "") or f"page-{page_number}-image-{index}"
+        data = getattr(image, "data", b"") or b""
+        pil_image = getattr(image, "image", None)
+        width = height = None
+        image_format = None
+        if pil_image is not None:
+            try:
+                width, height = pil_image.size
+            except Exception:
+                width = height = None
+            try:
+                image_format = (pil_image.format or "").lower() or None
+            except Exception:
+                image_format = None
+            if not data:
+                buffer = io.BytesIO()
+                save_format = pil_image.format or "PNG"
+                try:
+                    pil_image.save(buffer, format=save_format)
+                    data = buffer.getvalue()
+                    image_format = image_format or save_format.lower()
+                except Exception:
+                    data = b""
+        extracted.append(
+            ExtractedVisual(
+                page_number=page_number,
+                name=name,
+                image_format=image_format,
+                width=width,
+                height=height,
+                data=data,
+            )
+        )
+    return extracted
+
+
 def extract_pdf_text(
     file_bytes: bytes,
     use_ocr: bool,
     ocr_language: str,
     pdf_password: str | None = None,
-) -> Tuple[str, int, int, list[PageExtractionDiagnostic]]:
-    """Return extracted text, page count, OCR page count, and per-page diagnostics."""
+) -> Tuple[str, int, int, list[PageExtractionDiagnostic], list[ExtractedVisual]]:
+    """Return extracted text, page count, OCR page count, per-page diagnostics, and visuals."""
     try:
         reader = PdfReader(io.BytesIO(file_bytes))
     except PdfReadError as exc:
@@ -110,9 +165,11 @@ def extract_pdf_text(
     chunks = []
     ocr_pages = 0
     diagnostics: list[PageExtractionDiagnostic] = []
+    visuals: list[ExtractedVisual] = []
     label_notice = "Page labels like figures/tables/sections may be missing; do not fabricate them."
     for i, page in enumerate(reader.pages, start=1):
         image_count = count_page_images(page)
+        visuals.extend(extract_page_images(page, page_number=i))
         try:
             t = page.extract_text() or ""
         except Exception:
@@ -171,4 +228,4 @@ def extract_pdf_text(
                         text_length=0,
                     )
                 )
-    return "\n".join(chunks).strip(), pages, ocr_pages, diagnostics
+    return "\n".join(chunks).strip(), pages, ocr_pages, diagnostics, visuals
