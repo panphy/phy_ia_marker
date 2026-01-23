@@ -31,10 +31,10 @@ Ensure the system can account for **all content in PDFs** (text, photos, diagram
 
 ## Milestone 6: Prompt hardening and quality improvements
 - [x] Fix OCR confidence parsing to accept float-string values from Tesseract.
-- [ ] Add anti-injection guidance to visual analysis prompts (captions are untrusted input).
-- [ ] Redact injection phrases before visual analysis so captions can't steer vision outputs.
-- [ ] Deduplicate digest citation guidance in examiner prompts to reduce token overhead.
-- [ ] Move the "do not fabricate labels" notice out of IA text and into trusted prompt/coverage text.
-- [ ] Include PDF password (or a derived flag) in the document cache key to avoid stale extractions.
-- [ ] Clarify trusted vs untrusted input blocks in prompts to reduce ambiguity.
-- [ ] Tighten output schemas to reduce format drift under long contexts.
+- [x] Add anti-injection guidance to visual analysis prompts (captions are untrusted input).
+- [x] Redact injection phrases before visual analysis so captions can't steer vision outputs.
+- [x] Deduplicate digest citation guidance in examiner prompts to reduce token overhead.
+- [x] Move the "do not fabricate labels" notice out of IA text and into trusted prompt/coverage text.
+- [x] Include PDF password (or a derived flag) in the document cache key to avoid stale extractions.
+- [x] Clarify trusted vs untrusted input blocks in prompts to reduce ambiguity.
+- [x] Tighten output schemas to reduce format drift under long contexts.

@@ -262,7 +262,6 @@ def extract_pdf_text(
     ocr_pages = 0
     diagnostics: list[PageExtractionDiagnostic] = []
     visuals: list[ExtractedVisual] = []
-    label_notice = "Page labels like figures/tables/sections may be missing; do not fabricate them."
     for i, page in enumerate(reader.pages, start=1):
         image_count = count_page_images(page)
         page_images = extract_page_images(page, page_number=i)
@@ -276,7 +275,7 @@ def extract_pdf_text(
             t = ""
         t = re.sub(r"[ \t]+", " ", t).strip()
         if t:
-            chunks.append(f"\n\n--- Page {i} ---\nPage {i}. {label_notice}\n{t}")
+            chunks.append(f"\n\n--- Page {i} ---\n{t}")
             diagnostics.append(
                 PageExtractionDiagnostic(
                     page_number=i,
@@ -301,9 +300,7 @@ def extract_pdf_text(
                     ocr_confidence = None
             if ocr_text:
                 ocr_pages += 1
-                chunks.append(
-                    f"\n\n--- Page {i} ---\nPage {i}. {label_notice}\n[OCR]\n{ocr_text}"
-                )
+                chunks.append(f"\n\n--- Page {i} ---\n[OCR]\n{ocr_text}")
                 diagnostics.append(
                     PageExtractionDiagnostic(
                         page_number=i,
@@ -317,7 +314,7 @@ def extract_pdf_text(
                 )
             else:
                 chunks.append(
-                    f"\n\n--- Page {i} ---\nPage {i}. {label_notice}\n"
+                    f"\n\n--- Page {i} ---\n"
                     "[No extractable text found on this page]"
                 )
                 diagnostics.append(
