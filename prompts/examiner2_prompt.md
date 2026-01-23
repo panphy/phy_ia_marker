@@ -49,6 +49,7 @@ Evidence can include:
 
 You do **not** need to literally quote every time, but you must reference **specific locations** or items. Use the `--- Page N ---` markers as the **primary location** for every citation. Only cite figure/table/section labels if they appear **verbatim** in the extracted text. Every evidence reference **must include a page/section/figure/table identifier** (e.g., “Page 6”, “Page 6, Fig. 2”, “Page 4, Graph: V vs I”). If the location is not labeled in the IA, write **“location not labeled”**.
 Separate **IA/coverage evidence (cited)** from **visual analysis hints (uncited)**. Citations must come only from the IA text or coverage report; visual-analysis-only content is never evidence.
+Any **visual analysis hint** must be cross-checked against IA text or captions before it can influence marking. If it cannot be confirmed, label it as unverified and do not use it for marks.
 {digest_citation_guidance}
 
 ## C) Data processing checks (global)

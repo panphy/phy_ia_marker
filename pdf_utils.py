@@ -1,6 +1,6 @@
 import io
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Tuple
 
 from pdf2image import convert_from_bytes
@@ -30,6 +30,8 @@ class ExtractedVisual:
     data: bytes
     captions: tuple[str, ...] = ()
     kind: str = "image"
+    rasterized_data: bytes | None = None
+    rasterized_format: str | None = None
 
 
 @dataclass
@@ -216,6 +218,29 @@ def extract_vector_graphics(page: object, page_number: int) -> list[ExtractedVis
     return extracted
 
 
+def render_pdf_page_image(
+    file_bytes: bytes, page_number: int, dpi: int = 200
+) -> tuple[bytes | None, str | None]:
+    try:
+        images = convert_from_bytes(
+            file_bytes,
+            first_page=page_number,
+            last_page=page_number,
+            dpi=dpi,
+        )
+    except Exception:
+        return None, None
+    if not images:
+        return None, None
+    image = images[0]
+    buffer = io.BytesIO()
+    try:
+        image.save(buffer, format="PNG")
+    except Exception:
+        return None, None
+    return buffer.getvalue(), "png"
+
+
 def extract_pdf_text(
     file_bytes: bytes,
     use_ocr: bool,
@@ -266,6 +291,17 @@ def extract_pdf_text(
         image_count = count_page_images(page)
         page_images = extract_page_images(page, page_number=i)
         page_vectors = extract_vector_graphics(page, page_number=i)
+        if page_vectors:
+            rasterized_data, rasterized_format = render_pdf_page_image(file_bytes, page_number=i)
+            if rasterized_data:
+                page_vectors = [
+                    replace(
+                        visual,
+                        rasterized_data=rasterized_data,
+                        rasterized_format=rasterized_format,
+                    )
+                    for visual in page_vectors
+                ]
         visuals.extend(page_images)
         visuals.extend(page_vectors)
         vector_count = len(page_vectors)
