@@ -45,3 +45,8 @@ Ensure the system can account for **all content in PDFs** (text, photos, diagram
 - [x] Cache and reuse the computed coverage warnings to avoid double recomputation in the UI and keep warning text consistent.
 - [x] Add a prompts QA pass that checks for internal contradictions (e.g., “visual analysis untrusted” vs. “required inventory”) and resolves them with explicit guidance on what can be cited as evidence.
 - [x] Require the examiner/moderator prompts to separate “IA evidence” from “visual analysis hints” so citations always come from IA text or coverage report, never from vision-only output.
+
+## Milestone 8: Visual reliability upgrades (planned)
+- [ ] Render vector graphics to images for vision analysis so charts/diagrams in vector-only PDFs are not skipped.
+- [ ] Add a visual prioritization strategy (e.g., caption-matched visuals first) and allow configurable `max_visuals` to reduce missed figures.
+- [ ] Add a visual-to-text confirmation step: require any visual-analysis hint to be cross-checked against IA text/captions before it can influence marking.
