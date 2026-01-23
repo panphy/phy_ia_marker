@@ -6,7 +6,7 @@ Streamlit app that marks IB DP Physics Internal Assessments (first assessment 20
 - **Rubric-driven marking** for Research design, Data analysis, Conclusion, and Evaluation.
 - **Two examiner personas + chief moderator** for cross-checking and adjudication.
 - **PDF text extraction + OCR fallback** for scanned documents.
-- **Digest mode** for large IAs to fit within model context limits.
+- **Digest mode** for large IAs to fit within model context limits (auto-triggers over a size threshold).
 - **Downloadable markdown reports** and optional debug info.
 - **Password gate + cooldown** to reduce unauthorized access attempts.
 
@@ -28,14 +28,17 @@ Streamlit app that marks IB DP Physics Internal Assessments (first assessment 20
 ## Configuration notes
 - **Model**: change in the sidebar or edit `DEFAULT_MODEL` in `app.py`.
 - **OCR**: toggle in the sidebar; set OCR language via the text input.
-- **Digesting**: large PDFs are summarized into a structured digest before marking.
+- **Digesting**: large PDFs are summarized into a structured digest before marking. The digest
+  preserves key evidence (numbers, units, uncertainties, figures/tables) and keeps page-range
+  labels so citations can still reference where evidence came from.
 - **Storage**: `STORE_RESPONSES` is `False` by default for privacy.
 - **Password throttle**: the app blocks repeated failed password attempts for 5 minutes.
 - **Encrypted PDFs**: supply a PDF password in the sidebar if needed.
 
 ## How marking works
 1. The PDF is parsed page-by-page. If a page has no selectable text, OCR is attempted (if enabled).
-2. If the IA is too large, it is summarized into a structured digest to fit the model context.
+2. If the IA is too large, it is automatically summarized into a structured digest to fit the model
+   context. The digest keeps page-range labels so evidence can still be cited.
 3. Two examiner prompts produce independent reports.
 4. A moderator prompt adjudicates the final report using the IA, rubric, and both examiner reports.
 
