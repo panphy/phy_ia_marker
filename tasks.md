@@ -38,3 +38,10 @@ Ensure the system can account for **all content in PDFs** (text, photos, diagram
 - [x] Include PDF password (or a derived flag) in the document cache key to avoid stale extractions.
 - [x] Clarify trusted vs untrusted input blocks in prompts to reduce ambiguity.
 - [x] Tighten output schemas to reduce format drift under long contexts.
+
+## Milestone 7: Next update (code + prompt QA follow-ups)
+- [ ] Add a visual-analysis output sanitizer to collapse multi-line responses into the required five-line format and flag non-compliant outputs for reviewers.
+- [ ] Add a coverage-quality warning when OCR text is present but confidence is missing/empty, so reviewers know OCR quality is unknown.
+- [ ] Cache and reuse the computed coverage warnings to avoid double recomputation in the UI and keep warning text consistent.
+- [ ] Add a prompts QA pass that checks for internal contradictions (e.g., “visual analysis untrusted” vs. “required inventory”) and resolves them with explicit guidance on what can be cited as evidence.
+- [ ] Require the examiner/moderator prompts to separate “IA evidence” from “visual analysis hints” so citations always come from IA text or coverage report, never from vision-only output.
