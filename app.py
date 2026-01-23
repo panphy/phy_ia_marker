@@ -9,6 +9,7 @@ from openai import OpenAI
 from openai import APIConnectionError, APIError, APITimeoutError, RateLimitError
 
 from pdf_utils import (
+    ExtractedVisual,
     PageExtractionDiagnostic,
     PdfExtractionError,
     PdfPasswordRequiredError,
@@ -276,9 +277,21 @@ def find_unresolved_labels(raw_text: str) -> dict[str, list[str]]:
     }
 
 
+def find_page_captions(raw_text: str) -> dict[int, list[str]]:
+    caption_pattern = re.compile(r"^(Figure|Fig\.|Table)\s*\d+", re.IGNORECASE)
+    captions: dict[int, list[str]] = {}
+    for page_number, page_text in split_pages(raw_text):
+        lines = [line.strip() for line in page_text.splitlines() if line.strip()]
+        for line in lines:
+            if caption_pattern.match(line):
+                captions.setdefault(page_number, []).append(line)
+    return captions
+
+
 def build_coverage_report(
     diagnostics: list[PageExtractionDiagnostic],
     unresolved_labels: dict[str, list[str]],
+    extracted_visuals: list[ExtractedVisual] | None = None,
 ) -> str:
     total_pages = len(diagnostics)
     ocr_pages = [diag.page_number for diag in diagnostics if diag.used_ocr]
@@ -295,6 +308,10 @@ def build_coverage_report(
         and diag.ocr_confidence < OCR_CONFIDENCE_WARNING_THRESHOLD
     ]
     image_pages = [diag.page_number for diag in diagnostics if diag.image_count > 0]
+    total_visuals = len(extracted_visuals or [])
+    captioned_visuals = 0
+    if extracted_visuals:
+        captioned_visuals = sum(1 for visual in extracted_visuals if getattr(visual, "captions", []))
 
     report_lines = [
         "Content coverage report (auto-generated):",
@@ -303,6 +320,7 @@ def build_coverage_report(
         f"- Pages with OCR text: {len(ocr_pages)}",
         f"- Pages with no extractable text: {len(no_text_pages)}",
         f"- Pages with embedded images detected: {len(image_pages)}",
+        f"- Extracted visuals: {total_visuals}",
     ]
     if ocr_pages:
         report_lines.append(f"- OCR pages: {', '.join(map(str, ocr_pages))}")
@@ -315,6 +333,8 @@ def build_coverage_report(
         )
     if image_pages:
         report_lines.append(f"- Image pages: {', '.join(map(str, image_pages))}")
+    if total_visuals:
+        report_lines.append(f"- Extracted visuals with caption matches: {captioned_visuals}")
 
     missing_captions = unresolved_labels.get("missing_captions", [])
     unlabeled_mentions = unresolved_labels.get("unlabeled_mentions", [])
@@ -629,6 +649,8 @@ if "ia_coverage_report" not in st.session_state:
     st.session_state.ia_coverage_report = ""
 if "ia_page_diagnostics" not in st.session_state:
     st.session_state.ia_page_diagnostics = []
+if "ia_extracted_visuals" not in st.session_state:
+    st.session_state.ia_extracted_visuals = []
 if "criteria_text" not in st.session_state:
     st.session_state.criteria_text = ""
 if "last_upload_key" not in st.session_state:
@@ -643,6 +665,7 @@ def reset_reports() -> None:
     st.session_state.doc_cache_key = None
     st.session_state.ia_coverage_report = ""
     st.session_state.ia_page_diagnostics = []
+    st.session_state.ia_extracted_visuals = []
 
 
 def record_llm_error(context: str, error: LLMError) -> None:
@@ -679,7 +702,7 @@ def ensure_documents(
     reset_reports()
     with st.spinner("Extracting text from PDF..."):
         try:
-            ia_text, ia_pages, ia_ocr_pages, ia_diagnostics = extract_pdf_text(
+            ia_text, ia_pages, ia_ocr_pages, ia_diagnostics, ia_visuals = extract_pdf_text(
                 ia_bytes,
                 use_ocr=use_ocr,
                 ocr_language=ocr_language_setting,
@@ -695,7 +718,24 @@ def ensure_documents(
         st.warning("IA PDF appears to have little extractable text (possibly scanned). Marking quality may suffer.")
 
     unresolved_labels = find_unresolved_labels(ia_text)
-    coverage_report = build_coverage_report(ia_diagnostics, unresolved_labels)
+    page_captions = find_page_captions(ia_text)
+    visuals_with_captions = [
+        ExtractedVisual(
+            page_number=visual.page_number,
+            name=visual.name,
+            image_format=visual.image_format,
+            width=visual.width,
+            height=visual.height,
+            data=visual.data,
+            captions=tuple(page_captions.get(visual.page_number, [])),
+        )
+        for visual in ia_visuals
+    ]
+    coverage_report = build_coverage_report(
+        ia_diagnostics,
+        unresolved_labels,
+        extracted_visuals=visuals_with_captions,
+    )
 
     injection_matches = scan_injection_phrases(ia_text)
     if injection_matches:
@@ -732,6 +772,19 @@ def ensure_documents(
             "ia_used_chunking": ia_ready.used_chunking,
             "ia_chars": len(ia_text),
             "criteria_chars": len(criteria_text),
+            "ia_visuals_count": len(visuals_with_captions),
+            "ia_visuals_metadata": [
+                {
+                    "page_number": visual.page_number,
+                    "name": visual.name,
+                    "format": visual.image_format,
+                    "width": visual.width,
+                    "height": visual.height,
+                    "byte_size": len(visual.data),
+                    "captions": list(visual.captions),
+                }
+                for visual in visuals_with_captions
+            ],
             "injection_scan": {
                 "matches": injection_matches,
                 "redacted": bool(injection_matches),
@@ -744,6 +797,7 @@ def ensure_documents(
     st.session_state.criteria_text = criteria_text
     st.session_state.ia_coverage_report = coverage_report
     st.session_state.ia_page_diagnostics = ia_diagnostics
+    st.session_state.ia_extracted_visuals = visuals_with_captions
 
 
 has_existing_reports = any(
