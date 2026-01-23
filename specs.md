@@ -4,6 +4,7 @@
 - **Purpose**: Grading/assessment tooling for physics IA (see `app.py`, `criteria/`, `prompts/`).
 - **Primary entrypoint**: `app.py` (likely the main CLI/server runner).
 - **Supporting modules**: `pdf_utils.py` for PDF/text handling; `tests/` for validation.
+- **Coverage goal**: Ensure the system can account for all PDF content (text + visuals) and explicitly flag any unread content to avoid unfair marking.
 
 ## Repository layout
 - `app.py`: top-level application wiring, orchestration, and I/O.
@@ -38,6 +39,7 @@
 - **Update scoring/rubrics**: edit files in `criteria/` and ensure they are referenced in `app.py`.
 - **Update prompts**: edit files in `prompts/` and confirm `app.py` loads the correct templates.
 - **Improve PDF parsing**: update `pdf_utils.py` and add tests that exercise extraction.
+- **Improve visual coverage**: update extraction + prompts to cover photos/diagrams/graphs/tables and report any missing content.
 
 ## Pull request checklist
 - Summarize changes with affected modules and rationale.
