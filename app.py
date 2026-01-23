@@ -9,6 +9,7 @@ from openai import OpenAI
 from openai import APIConnectionError, APIError, APITimeoutError, RateLimitError
 
 from pdf_utils import (
+    PageExtractionDiagnostic,
     PdfExtractionError,
     PdfPasswordRequiredError,
     extract_pdf_text,
@@ -26,6 +27,7 @@ STORE_RESPONSES = False                # privacy-friendly default
 CRITERIA_PATH = Path(__file__).resolve().parent / "criteria" / "ib_phy_ia_criteria.md"
 MAX_PASSWORD_ATTEMPTS = 5
 PASSWORD_ATTEMPT_WINDOW_SECONDS = 300
+OCR_CONFIDENCE_WARNING_THRESHOLD = 60.0
 
 # -------------------------
 # Prompt templates (loaded from files)
@@ -233,6 +235,154 @@ def redact_injection_spans(text: str, matches: list[dict[str, object]]) -> str:
         end = int(match["end"])
         redacted = f"{redacted[:start]}[REDACTED INJECTION PHRASE]{redacted[end:]}"
     return redacted
+
+
+def find_unresolved_labels(raw_text: str) -> dict[str, list[str]]:
+    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    label_pattern = re.compile(r"\b(Figure|Fig\.|Table)\s*(\d+)", re.IGNORECASE)
+    loose_pattern = re.compile(r"\b(Figure|Fig\.|Table)\b", re.IGNORECASE)
+
+    referenced_labels: set[str] = set()
+    caption_labels: set[str] = set()
+    unlabeled_mentions: list[str] = []
+
+    for line in lines:
+        matches = list(label_pattern.finditer(line))
+        if matches:
+            for match in matches:
+                kind = match.group(1).lower()
+                if kind.startswith("fig"):
+                    kind_label = "Figure"
+                else:
+                    kind_label = "Table"
+                label = f"{kind_label} {match.group(2)}"
+                referenced_labels.add(label)
+            if line.lower().startswith(("figure", "fig.", "table")):
+                for match in matches:
+                    kind = match.group(1).lower()
+                    if kind.startswith("fig"):
+                        kind_label = "Figure"
+                    else:
+                        kind_label = "Table"
+                    label = f"{kind_label} {match.group(2)}"
+                    caption_labels.add(label)
+        elif loose_pattern.search(line) and line.lower().startswith(("figure", "fig.", "table")):
+            unlabeled_mentions.append(line)
+
+    missing_captions = sorted(referenced_labels - caption_labels)
+    return {
+        "missing_captions": missing_captions,
+        "unlabeled_mentions": unlabeled_mentions,
+    }
+
+
+def build_coverage_report(
+    diagnostics: list[PageExtractionDiagnostic],
+    unresolved_labels: dict[str, list[str]],
+) -> str:
+    total_pages = len(diagnostics)
+    ocr_pages = [diag.page_number for diag in diagnostics if diag.used_ocr]
+    no_text_pages = [
+        diag.page_number
+        for diag in diagnostics
+        if not diag.has_text and not diag.used_ocr
+    ]
+    low_conf_pages = [
+        diag.page_number
+        for diag in diagnostics
+        if diag.used_ocr
+        and diag.ocr_confidence is not None
+        and diag.ocr_confidence < OCR_CONFIDENCE_WARNING_THRESHOLD
+    ]
+    image_pages = [diag.page_number for diag in diagnostics if diag.image_count > 0]
+
+    report_lines = [
+        "Content coverage report (auto-generated):",
+        f"- Total pages: {total_pages}",
+        f"- Pages with selectable text: {total_pages - len(no_text_pages) - len(ocr_pages)}",
+        f"- Pages with OCR text: {len(ocr_pages)}",
+        f"- Pages with no extractable text: {len(no_text_pages)}",
+        f"- Pages with embedded images detected: {len(image_pages)}",
+    ]
+    if ocr_pages:
+        report_lines.append(f"- OCR pages: {', '.join(map(str, ocr_pages))}")
+    if no_text_pages:
+        report_lines.append(f"- No-text pages: {', '.join(map(str, no_text_pages))}")
+    if low_conf_pages:
+        report_lines.append(
+            f"- Low OCR confidence pages (<{OCR_CONFIDENCE_WARNING_THRESHOLD:.0f}): "
+            + ", ".join(map(str, low_conf_pages))
+        )
+    if image_pages:
+        report_lines.append(f"- Image pages: {', '.join(map(str, image_pages))}")
+
+    missing_captions = unresolved_labels.get("missing_captions", [])
+    unlabeled_mentions = unresolved_labels.get("unlabeled_mentions", [])
+    if missing_captions:
+        report_lines.append("- Figure/table references without clear captions: " + ", ".join(missing_captions))
+    if unlabeled_mentions:
+        report_lines.append("- Figure/table mentions without labels:")
+        for mention in unlabeled_mentions[:5]:
+            report_lines.append(f"  - {mention}")
+        if len(unlabeled_mentions) > 5:
+            report_lines.append(f"  - ...and {len(unlabeled_mentions) - 5} more")
+
+    report_lines.append(
+        "Use this report to flag missing/unreadable evidence. Do not invent details from unread pages."
+    )
+    return "\n".join(report_lines)
+
+
+def format_page_diagnostics(diagnostics: list[PageExtractionDiagnostic]) -> list[dict[str, object]]:
+    rows = []
+    for diag in diagnostics:
+        if diag.has_text:
+            source = "Text"
+        elif diag.used_ocr:
+            source = "OCR"
+        else:
+            source = "No text"
+        rows.append(
+            {
+                "Page": diag.page_number,
+                "Source": source,
+                "OCR confidence": (
+                    f"{diag.ocr_confidence:.1f}" if diag.ocr_confidence is not None else "—"
+                ),
+                "Images": diag.image_count,
+                "Text chars": diag.text_length,
+            }
+        )
+    return rows
+
+
+def summarize_coverage_warnings(diagnostics: list[PageExtractionDiagnostic]) -> list[str]:
+    total_pages = len(diagnostics)
+    no_text_pages = [
+        diag.page_number
+        for diag in diagnostics
+        if not diag.has_text and not diag.used_ocr
+    ]
+    low_conf_pages = [
+        diag.page_number
+        for diag in diagnostics
+        if diag.used_ocr
+        and diag.ocr_confidence is not None
+        and diag.ocr_confidence < OCR_CONFIDENCE_WARNING_THRESHOLD
+    ]
+    warnings = []
+    if no_text_pages:
+        warnings.append(
+            f"{len(no_text_pages)} of {total_pages} pages have no extractable text "
+            f"({', '.join(map(str, no_text_pages))})."
+        )
+    if low_conf_pages:
+        warnings.append(
+            "Low OCR confidence detected on pages: "
+            + ", ".join(map(str, low_conf_pages))
+            + "."
+        )
+    return warnings
 
 
 def make_structured_digest(client: OpenAI, model: str, label: str, raw_text: str) -> AIResult:
@@ -475,6 +625,10 @@ if "ia_ready_text" not in st.session_state:
     st.session_state.ia_ready_text = ""
 if "ia_used_digest" not in st.session_state:
     st.session_state.ia_used_digest = False
+if "ia_coverage_report" not in st.session_state:
+    st.session_state.ia_coverage_report = ""
+if "ia_page_diagnostics" not in st.session_state:
+    st.session_state.ia_page_diagnostics = []
 if "criteria_text" not in st.session_state:
     st.session_state.criteria_text = ""
 if "last_upload_key" not in st.session_state:
@@ -487,6 +641,8 @@ def reset_reports() -> None:
     st.session_state.moderator_report = ""
     st.session_state.debug_info = {}
     st.session_state.doc_cache_key = None
+    st.session_state.ia_coverage_report = ""
+    st.session_state.ia_page_diagnostics = []
 
 
 def record_llm_error(context: str, error: LLMError) -> None:
@@ -523,7 +679,7 @@ def ensure_documents(
     reset_reports()
     with st.spinner("Extracting text from PDF..."):
         try:
-            ia_text, ia_pages, ia_ocr_pages = extract_pdf_text(
+            ia_text, ia_pages, ia_ocr_pages, ia_diagnostics = extract_pdf_text(
                 ia_bytes,
                 use_ocr=use_ocr,
                 ocr_language=ocr_language_setting,
@@ -537,6 +693,9 @@ def ensure_documents(
 
     if ia_text.count("[No extractable text") > ia_pages * 0.7:
         st.warning("IA PDF appears to have little extractable text (possibly scanned). Marking quality may suffer.")
+
+    unresolved_labels = find_unresolved_labels(ia_text)
+    coverage_report = build_coverage_report(ia_diagnostics, unresolved_labels)
 
     injection_matches = scan_injection_phrases(ia_text)
     if injection_matches:
@@ -557,6 +716,18 @@ def ensure_documents(
         st.session_state.debug_info = {
             "ia_pages": ia_pages,
             "ia_ocr_pages": ia_ocr_pages,
+            "ia_page_diagnostics": [
+                {
+                    "page": diag.page_number,
+                    "has_text": diag.has_text,
+                    "used_ocr": diag.used_ocr,
+                    "ocr_confidence": diag.ocr_confidence,
+                    "image_count": diag.image_count,
+                    "text_length": diag.text_length,
+                }
+                for diag in ia_diagnostics
+            ],
+            "ia_coverage_report": coverage_report,
             "ia_used_digest": ia_ready.used_digest,
             "ia_used_chunking": ia_ready.used_chunking,
             "ia_chars": len(ia_text),
@@ -571,6 +742,8 @@ def ensure_documents(
     st.session_state.ia_ready_text = ia_ready.text
     st.session_state.ia_used_digest = ia_ready.used_digest
     st.session_state.criteria_text = criteria_text
+    st.session_state.ia_coverage_report = coverage_report
+    st.session_state.ia_page_diagnostics = ia_diagnostics
 
 
 has_existing_reports = any(
@@ -663,6 +836,7 @@ if selected_action:
             examiner_input = EXAMINER1_PROMPT.format(
                 rubric_text=criteria_ready.text,
                 ia_text=ia_ready.text,
+                coverage_report=st.session_state.ia_coverage_report,
                 digest_citation_guidance=digest_citation_guidance,
             )
             try:
@@ -694,6 +868,7 @@ if selected_action:
             examiner_input = EXAMINER2_PROMPT.format(
                 rubric_text=criteria_ready.text,
                 ia_text=ia_ready.text,
+                coverage_report=st.session_state.ia_coverage_report,
                 digest_citation_guidance=digest_citation_guidance,
             )
             try:
@@ -727,6 +902,7 @@ if selected_action:
                 ia_text=ia_ready.text,
                 examiner1_report=st.session_state.examiner1_report,
                 examiner2_report=st.session_state.examiner2_report,
+                coverage_report=st.session_state.ia_coverage_report,
                 digest_citation_guidance=digest_citation_guidance,
             )
             try:
@@ -752,6 +928,23 @@ if selected_action:
                         "Check that evidence references include page or digest range labels."
                     )
                 st.success("Moderator report generated.")
+
+# -------------------------
+# Coverage summary
+# -------------------------
+if st.session_state.ia_page_diagnostics:
+    st.markdown("---")
+    st.subheader("Content coverage")
+    for warning in summarize_coverage_warnings(st.session_state.ia_page_diagnostics):
+        st.warning(warning)
+    if summarize_coverage_warnings(st.session_state.ia_page_diagnostics):
+        st.info(
+            "If coverage is low, consider uploading a higher-quality scan or exporting the PDF "
+            "with selectable text to improve marking accuracy."
+        )
+    st.text(st.session_state.ia_coverage_report)
+    with st.expander("Per-page extraction diagnostics"):
+        st.table(format_page_diagnostics(st.session_state.ia_page_diagnostics))
 
 # -------------------------
 # Display + downloads

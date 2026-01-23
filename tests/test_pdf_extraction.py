@@ -37,7 +37,7 @@ def test_extract_pdf_text_rejects_wrong_password_for_encrypted_pdf() -> None:
 def test_extract_pdf_text_accepts_correct_password_for_encrypted_pdf() -> None:
     encrypted_pdf = build_encrypted_pdf("secret")
 
-    text, pages, ocr_pages = extract_pdf_text(
+    text, pages, ocr_pages, diagnostics = extract_pdf_text(
         encrypted_pdf,
         use_ocr=False,
         ocr_language="eng",
@@ -47,3 +47,5 @@ def test_extract_pdf_text_accepts_correct_password_for_encrypted_pdf() -> None:
     assert pages == 1
     assert ocr_pages == 0
     assert "[No extractable text found on this page]" in text
+    assert diagnostics[0].page_number == 1
+    assert diagnostics[0].has_text is False

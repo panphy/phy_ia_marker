@@ -9,6 +9,16 @@ from pypdf.errors import PdfReadError
 import pytesseract
 
 
+@dataclass(frozen=True)
+class PageExtractionDiagnostic:
+    page_number: int
+    has_text: bool
+    used_ocr: bool
+    ocr_confidence: float | None
+    image_count: int
+    text_length: int
+
+
 @dataclass
 class PdfExtractionError(Exception):
     user_message: str
@@ -18,15 +28,41 @@ class PdfPasswordRequiredError(PdfExtractionError):
     pass
 
 
-def ocr_pdf_page(file_bytes: bytes, page_number: int, language: str) -> str:
+def ocr_pdf_page(file_bytes: bytes, page_number: int, language: str) -> tuple[str, float | None]:
     images = convert_from_bytes(
         file_bytes,
         first_page=page_number,
         last_page=page_number,
     )
     if not images:
-        return ""
-    return pytesseract.image_to_string(images[0], lang=language).strip()
+        return "", None
+    image = images[0]
+    text = pytesseract.image_to_string(image, lang=language).strip()
+    confidence = None
+    try:
+        data = pytesseract.image_to_data(image, lang=language, output_type=pytesseract.Output.DICT)
+        confidences = [
+            int(value)
+            for value in data.get("conf", [])
+            if isinstance(value, (int, float)) or (isinstance(value, str) and value.isdigit())
+        ]
+        confidences = [value for value in confidences if value >= 0]
+        if confidences:
+            confidence = sum(confidences) / len(confidences)
+    except Exception:
+        confidence = None
+    return text, confidence
+
+
+def count_page_images(page: object) -> int:
+    try:
+        images = page.images
+    except Exception:
+        return 0
+    try:
+        return len(images)
+    except TypeError:
+        return 0
 
 
 def extract_pdf_text(
@@ -34,8 +70,8 @@ def extract_pdf_text(
     use_ocr: bool,
     ocr_language: str,
     pdf_password: str | None = None,
-) -> Tuple[str, int, int]:
-    """Return extracted text, page count, and OCR page count."""
+) -> Tuple[str, int, int, list[PageExtractionDiagnostic]]:
+    """Return extracted text, page count, OCR page count, and per-page diagnostics."""
     try:
         reader = PdfReader(io.BytesIO(file_bytes))
     except PdfReadError as exc:
@@ -73,8 +109,10 @@ def extract_pdf_text(
     pages = len(reader.pages)
     chunks = []
     ocr_pages = 0
+    diagnostics: list[PageExtractionDiagnostic] = []
     label_notice = "Page labels like figures/tables/sections may be missing; do not fabricate them."
     for i, page in enumerate(reader.pages, start=1):
+        image_count = count_page_images(page)
         try:
             t = page.extract_text() or ""
         except Exception:
@@ -82,21 +120,55 @@ def extract_pdf_text(
         t = re.sub(r"[ \t]+", " ", t).strip()
         if t:
             chunks.append(f"\n\n--- Page {i} ---\nPage {i}. {label_notice}\n{t}")
+            diagnostics.append(
+                PageExtractionDiagnostic(
+                    page_number=i,
+                    has_text=True,
+                    used_ocr=False,
+                    ocr_confidence=None,
+                    image_count=image_count,
+                    text_length=len(t),
+                )
+            )
         else:
             ocr_text = ""
+            ocr_confidence = None
             if use_ocr:
                 try:
-                    ocr_text = ocr_pdf_page(file_bytes, page_number=i, language=ocr_language)
+                    ocr_text, ocr_confidence = ocr_pdf_page(
+                        file_bytes, page_number=i, language=ocr_language
+                    )
                 except Exception:
                     ocr_text = ""
+                    ocr_confidence = None
             if ocr_text:
                 ocr_pages += 1
                 chunks.append(
                     f"\n\n--- Page {i} ---\nPage {i}. {label_notice}\n[OCR]\n{ocr_text}"
+                )
+                diagnostics.append(
+                    PageExtractionDiagnostic(
+                        page_number=i,
+                        has_text=False,
+                        used_ocr=True,
+                        ocr_confidence=ocr_confidence,
+                        image_count=image_count,
+                        text_length=len(ocr_text),
+                    )
                 )
             else:
                 chunks.append(
                     f"\n\n--- Page {i} ---\nPage {i}. {label_notice}\n"
                     "[No extractable text found on this page]"
                 )
-    return "\n".join(chunks).strip(), pages, ocr_pages
+                diagnostics.append(
+                    PageExtractionDiagnostic(
+                        page_number=i,
+                        has_text=False,
+                        used_ocr=False,
+                        ocr_confidence=None,
+                        image_count=image_count,
+                        text_length=0,
+                    )
+                )
+    return "\n".join(chunks).strip(), pages, ocr_pages, diagnostics
