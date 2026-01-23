@@ -88,10 +88,15 @@ Provide a **proper Markdown table** with:
 ### 4) Short final report
 A concise paragraph summarizing the decision, highlighting the most important evidence.
 
-### 5) Red flags / integrity concerns (only if evidence appears)
+### 5) Visual summary + tables/graphs inventory (required)
+- Bullet list of all figures/graphs/tables referenced in the IA text or coverage report.
+- For each item: give location, what it appears to show, and whether it was readable/extractable.
+- If visuals are mentioned but not readable or missing, say so explicitly.
+
+### 6) Red flags / integrity concerns (only if evidence appears)
 List concerns as concerns (not accusations) with the triggering evidence. Label each item as **“possible concern”** or **“confirmed issue”** and include exact evidence locations; do not infer intent.
 
-### 6) Coverage report (required)
+### 7) Coverage report (required)
 Briefly summarize any missing/unreadable content that could affect marking, based on the coverage report.
 
 # Strict rules
