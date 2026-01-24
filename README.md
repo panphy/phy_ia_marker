@@ -20,7 +20,6 @@ Streamlit app that marks IB DP Physics Internal Assessments (first assessment 20
 - `prompts/` — prompt templates for the two examiners and moderator.
 - `tests/` — unit tests for prompt QA and PDF extraction utilities.
 - `tasks.md` — roadmap and follow-up tasks.
-- `specs.md` — prompt/format specifications and workflow notes.
 
 ## Usage
 1. Open the app in your browser.
