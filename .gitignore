@@ -1,3 +1,24 @@
+# OS / editor artifacts
 .DS_Store
+
+# Python bytecode and caches
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local secrets / environment files
+.env
+.env.*
+.streamlit/secrets.toml
+
+# Packaging artifacts
+build/
+dist/
+*.egg-info/
