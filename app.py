@@ -40,6 +40,9 @@ PASSWORD_ATTEMPT_WINDOW_SECONDS = 300
 OCR_CONFIDENCE_WARNING_THRESHOLD = 60.0
 MAX_VISUALS_PER_ANALYSIS = 12
 MAX_UNCAPTIONED_VISUALS = 4
+PANPHY_ASSETS_BASE_URL = "https://panphy.github.io/assets"
+PANPHY_LOGO_URL = f"{PANPHY_ASSETS_BASE_URL}/panphy-logo.png"
+PANPHY_FAVICON_URL = f"{PANPHY_ASSETS_BASE_URL}/panphy-favicon.png"
 
 # -------------------------
 # Prompt templates (loaded from files)
@@ -740,8 +743,9 @@ def maybe_digest(
 # -------------------------
 # Streamlit UI
 # -------------------------
-st.set_page_config(page_title=APP_TITLE, layout="wide")
+st.set_page_config(page_title=APP_TITLE, page_icon=PANPHY_FAVICON_URL, layout="wide")
 st.title(APP_TITLE)
+st.sidebar.image(PANPHY_LOGO_URL, width="stretch")
 st.markdown(
     """
     <style>
