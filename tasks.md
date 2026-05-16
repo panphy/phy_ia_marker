@@ -25,9 +25,9 @@ Ensure the system can account for **all content in PDFs** (text, photos, diagram
 ## Bug fixes (code)
 
 ### High priority
-- [ ] **Fix image-count diagnostics** (`pdf_utils.py:79-87`): Use `len(page_images)` from the extracted image list instead of `count_page_images(page)`. The `page.images` property can be non-sized, causing `image_count=0` even when images exist.
-- [ ] **Add regression test for image-count accuracy**: Ensure image-count diagnostics match extracted visuals for image-only PDFs.
-- [ ] **Capture figure/table label suffixes** (`app.py:240`): Update regex from `(\d+)` to `(\d+[a-zA-Z]*)` to capture labels like "Figure 2a", "Table 3i" for accurate unresolved-label reporting.
+- [x] **Fix image-count diagnostics** (`pdf_utils.py`): Use `len(page_images)` from the extracted image list instead of `count_page_images(page)`. The `page.images` property can be non-sized, causing `image_count=0` even when images exist.
+- [x] **Add regression test for image-count accuracy**: Ensure image-count diagnostics match extracted visuals for image-only PDFs.
+- [x] **Capture figure/table label suffixes** (`app.py`): Update regex from `(\d+)` to `(\d+[a-zA-Z]*)` to capture labels like "Figure 2a", "Table 3i" for accurate unresolved-label reporting.
 
 ### Medium priority
 - [ ] **Add optional DPI control or caching for vector rasterization**: Avoid repeated high-cost renders on large PDFs.

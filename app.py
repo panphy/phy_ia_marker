@@ -240,7 +240,7 @@ def redact_injection_spans(text: str, matches: list[dict[str, object]]) -> str:
 
 def find_unresolved_labels(raw_text: str) -> dict[str, list[str]]:
     lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-    label_pattern = re.compile(r"\b(Figure|Fig\.|Table)\s*(\d+)", re.IGNORECASE)
+    label_pattern = re.compile(r"\b(Figure|Fig\.|Table)\s*(\d+[A-Za-z]*)", re.IGNORECASE)
     loose_pattern = re.compile(r"\b(Figure|Fig\.|Table)\b", re.IGNORECASE)
 
     referenced_labels: set[str] = set()
@@ -278,7 +278,7 @@ def find_unresolved_labels(raw_text: str) -> dict[str, list[str]]:
 
 
 def find_page_captions(raw_text: str) -> dict[int, list[str]]:
-    caption_pattern = re.compile(r"^(Figure|Fig\.|Table)\s*\d+", re.IGNORECASE)
+    caption_pattern = re.compile(r"^(Figure|Fig\.|Table)\s*\d+[A-Za-z]*", re.IGNORECASE)
     captions: dict[int, list[str]] = {}
     for page_number, page_text in split_pages(raw_text):
         lines = [line.strip() for line in page_text.splitlines() if line.strip()]
@@ -947,6 +947,50 @@ def ensure_documents(
         password_fingerprint,
     )
     if st.session_state.doc_cache_key == cache_key:
+        visual_state = st.session_state.debug_info.get("visual_analysis", {})
+        should_retry_visuals = (
+            enable_visual_analysis
+            and visual_state.get("error")
+            and st.session_state.ia_extracted_visuals
+        )
+        if should_retry_visuals:
+            visual_analysis_results: list[dict[str, object]] = []
+            visual_analysis_error: dict[str, str] | None = None
+            selected_visuals = select_visuals_for_analysis(
+                st.session_state.ia_extracted_visuals,
+                max_visuals=MAX_VISUALS_PER_ANALYSIS,
+                max_uncaptioned=MAX_UNCAPTIONED_VISUALS,
+            )
+            with st.spinner("Retrying visual analysis (vision model)..."):
+                try:
+                    visual_analysis_results = analyze_visuals(
+                        client,
+                        model=vision_model,
+                        visuals=st.session_state.ia_extracted_visuals,
+                        max_visuals=MAX_VISUALS_PER_ANALYSIS,
+                        max_uncaptioned=MAX_UNCAPTIONED_VISUALS,
+                    )
+                except LLMError as exc:
+                    visual_analysis_error = {
+                        "message": exc.user_message,
+                        "details": str(exc.debug_info),
+                    }
+            visual_analysis_text = format_visual_analysis(visual_analysis_results)
+            if visual_analysis_error:
+                visual_analysis_text += (
+                    f"\n\nVisual analysis error: {visual_analysis_error['message']}"
+                )
+            st.session_state.ia_visual_analysis = visual_analysis_text
+            st.session_state.debug_info["visual_analysis"] = {
+                "enabled": enable_visual_analysis,
+                "model": vision_model,
+                "requested_count": len(st.session_state.ia_extracted_visuals),
+                "selected_count": len(selected_visuals),
+                "max_visuals": MAX_VISUALS_PER_ANALYSIS,
+                "max_uncaptioned": MAX_UNCAPTIONED_VISUALS,
+                "results_count": len(visual_analysis_results),
+                "error": visual_analysis_error,
+            }
         return
 
     reset_reports()

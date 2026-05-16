@@ -2,10 +2,17 @@ import io
 
 import pytest
 from PIL import Image
+from pdf2image.exceptions import PDFPageCountError
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DictionaryObject, NameObject, StreamObject
 
-from pdf_utils import PdfPasswordRequiredError, extract_pdf_text
+from pdf_utils import (
+    PdfExtractionError,
+    PdfPasswordRequiredError,
+    ocr_pdf_page,
+    render_pdf_page_image,
+    extract_pdf_text,
+)
 
 
 def build_encrypted_pdf(password: str) -> bytes:
@@ -104,3 +111,68 @@ def test_extract_pdf_text_handles_mixed_content_pdf() -> None:
     assert diagnostics[1].has_text is False
     assert diagnostics[1].image_count >= 1
     assert any(visual.page_number == 2 for visual in visuals)
+
+
+def test_ocr_pdf_page_passes_pdf_password_to_renderer(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {}
+
+    class FakeImage:
+        pass
+
+    def fake_convert_from_bytes(*args, **kwargs):
+        calls["userpw"] = kwargs.get("userpw")
+        return [FakeImage()]
+
+    monkeypatch.setattr("pdf_utils.convert_from_bytes", fake_convert_from_bytes)
+    monkeypatch.setattr("pdf_utils.pytesseract.image_to_string", lambda *args, **kwargs: "OCR text")
+    monkeypatch.setattr(
+        "pdf_utils.pytesseract.image_to_data",
+        lambda *args, **kwargs: {"conf": ["92", "88"]},
+    )
+
+    text, confidence = ocr_pdf_page(
+        b"%PDF",
+        page_number=1,
+        language="eng",
+        pdf_password="secret",
+    )
+
+    assert text == "OCR text"
+    assert confidence == 90
+    assert calls["userpw"] == "secret"
+
+
+def test_render_pdf_page_image_passes_pdf_password_to_renderer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {}
+
+    class FakeImage:
+        def save(self, buffer, format):
+            buffer.write(b"png-bytes")
+
+    def fake_convert_from_bytes(*args, **kwargs):
+        calls["userpw"] = kwargs.get("userpw")
+        return [FakeImage()]
+
+    monkeypatch.setattr("pdf_utils.convert_from_bytes", fake_convert_from_bytes)
+
+    data, image_format = render_pdf_page_image(
+        b"%PDF",
+        page_number=1,
+        pdf_password="secret",
+    )
+
+    assert data == b"png-bytes"
+    assert image_format == "png"
+    assert calls["userpw"] == "secret"
+
+
+def test_ocr_pdf_page_surfaces_renderer_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_convert_from_bytes(*args, **kwargs):
+        raise PDFPageCountError("unable to get page count")
+
+    monkeypatch.setattr("pdf_utils.convert_from_bytes", fake_convert_from_bytes)
+
+    with pytest.raises(PdfExtractionError, match="Unable to render"):
+        ocr_pdf_page(b"%PDF", page_number=1, language="eng")
