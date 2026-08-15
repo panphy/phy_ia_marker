@@ -1,15 +1,16 @@
 # IB DP Physics IA Marker
 
-Streamlit app that marks IB DP Physics Internal Assessments (first assessment 2025) using the official rubric. It extracts text from a student IA PDF (with optional OCR), adds coverage diagnostics and visual analysis summaries, injects the rubric and IA into structured prompts, and produces examiner/moderator Markdown reports.
+Modern Streamlit workspace for reviewing IB DP Physics scientific investigations (first assessment 2025 onward) against the current official rubric. It extracts evidence from a student PDF, checks coverage, runs two independent specialist examiners, and asks a chief moderator to adjudicate the final mark.
 
 ## Features
 - **Rubric-driven marking** for Research design, Data analysis, Conclusion, and Evaluation.
-- **Two examiner personas + chief moderator** for cross-checking and adjudication.
+- **Two genuinely distinct examiners**: an Experimentalist and a Data & Physics Analyst.
+- **Chief-moderator adjudication** based on an independent provisional mark—not an average.
 - **PDF text extraction + OCR fallback** for scanned documents, with per-page diagnostics.
 - **Digest mode** for large IAs to fit within model context limits (auto-triggers over a size threshold).
 - **Visual extraction + vision summaries** for raster images and vector graphics.
 - **Coverage reporting** that flags missing text, OCR confidence, and unresolved figure/table labels.
-- **Downloadable Markdown reports** and optional debug info.
+- **One-click complete assessment**, stage-by-stage reruns, score cards and downloadable Markdown reports.
 - **Password gate + cooldown** to reduce unauthorized access attempts.
 
 ## Repository layout
@@ -25,12 +26,13 @@ Streamlit app that marks IB DP Physics Internal Assessments (first assessment 20
 1. Open the app in your browser.
 2. Enter the app password.
 3. Upload a student IA PDF.
-4. Generate both **Examiner 1** and **Examiner 2** reports.
-5. Run the **Moderator** report once both examiner reports are available.
-6. Download the generated report(s) as Markdown.
+4. Select **Run complete assessment**.
+5. Review the final decision, both independent reports and evidence coverage.
+6. Download the final decision or the complete Markdown bundle.
 
 ## Configuration notes
-- **Model**: change in the sidebar or edit `DEFAULT_MODEL` in `app.py`.
+- **Models**: marking uses `gpt-5.6-sol`; visual extraction uses `gpt-5.6-terra`.
+- **Reasoning**: marking and adjudication use high reasoning effort; evidence-preserving digest work uses low effort.
 - **OCR**: toggle in the sidebar; set OCR language via the text input.
 - **Digesting**: large PDFs are summarized into a structured digest before marking. The digest
   preserves key evidence (numbers, units, uncertainties, figures/tables) and keeps page-range
@@ -44,8 +46,12 @@ Streamlit app that marks IB DP Physics Internal Assessments (first assessment 20
 1. The PDF is parsed page-by-page. If a page has no selectable text, OCR is attempted (if enabled).
 2. If the IA is too large, it is automatically summarized into a structured digest to fit the model
    context. The digest keeps page-range labels so evidence can still be cited.
-3. Two examiner prompts produce independent reports.
-4. A moderator prompt adjudicates the final report using the IA, rubric, and both examiner reports.
+3. The Experimentalist reviews experimental design, reproducibility and evaluation quality.
+4. The Data & Physics Analyst independently reviews processing, uncertainty and physical reasoning.
+5. The Chief Moderator forms an independent provisional mark, verifies both reports against the IA, and adjudicates the final result without averaging.
+
+## Rubric currency
+The bundled rubric is sourced from the *Physics guide* (February 2023, updated November 2024), first assessment 2025. The IB's 2026 Physics examiner instructions continue to use the same four criteria and 24-mark structure. Current-session application notes are recorded in `criteria/ib_phy_ia_criteria.md`.
 
 ## How visuals are read and used
 1. **Visual extraction**: embedded raster images are extracted from the PDF. Vector graphics are detected and rasterized per page for vision analysis when possible.  

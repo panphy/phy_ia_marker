@@ -41,43 +41,34 @@ Ensure the system can account for **all content in PDFs** (text, photos, diagram
 ## Prompt improvements (for human-equivalent marking quality)
 
 ### High priority - Examiner differentiation
-- [ ] **Differentiate Examiner 1 and 2 personas**: Currently near-identical (only one sentence differs). Create genuinely distinct marking perspectives:
+- [x] **Differentiate Examiner 1 and 2 personas**: Implemented genuinely distinct marking perspectives:
   - **Examiner 1 ("The Experimentalist")**: Emphasize practical methodology, equipment choices, control variables, reproducibility. Key question: "Could I reproduce this in my lab with these instructions?"
   - **Examiner 2 ("The Analyst")**: Emphasize statistical rigor, uncertainty propagation, data visualization quality, fit appropriateness. Key question: "Does the data processing support the claimed precision?"
 
 ### High priority - Calibration and boundaries
-- [ ] **Add calibration examples to examiner prompts**: Include anonymized excerpts showing what each mark band looks like for each criterion. Example:
-  - 6/6 Research Design: RQ with both variables, specific context citing physics principles, methodology specifies WHY chosen ranges
-  - 4/6 Research Design: All elements present but one is superficial, reproducibility requires minor assumptions
-  - 2/6 Research Design: RQ vague, no variables stated, procedure lacks detail
-- [ ] **Add grade boundary guidance**: Explicit decision rules for distinguishing adjacent bands (e.g., "Award 6 when... Award 5 when..."). Currently prompts say "if between bands, state why" but give no criteria.
+- [x] **Add within-band calibration rules to examiner prompts**: Added lower/upper band decision rules without inventing unofficial numerical thresholds. Golden-example calibration remains part of the eval roadmap rather than the production prompt.
+- [x] **Add grade boundary guidance**: Prompts now require holistic best-fit band selection, lower/upper within-band calibration, and an explicit counter-check against the next mark.
 
 ### Medium priority - Physics-specific assessment
-- [ ] **Add physics-specific data processing checks**: Extend the "Data processing checks" section with:
+- [x] **Add physics-specific data processing checks**: Extended the analyst and moderator checks with:
   - Linearization appropriateness (e.g., T² vs L for pendulum, correct transformed uncertainties)
   - Significant figure conventions (final results match measurement precision, intermediate calcs carried to extra precision)
   - Error bar sizing and presence on graphs
   - Residual analysis interpretation (random vs systematic patterns)
   - Fit choice justification (not just "best R²" but theoretically motivated)
-- [ ] **Enhance visual analysis prompt** (`app.py:504-532`): Add physics-specific checks:
-  - Are error bars present and appropriately sized?
-  - Is the fit type theoretically justified?
-  - Are residuals random or showing systematic pattern?
-  - Do axes start from zero when appropriate?
-  - Is linearization the standard approach for the phenomenon?
+- [x] **Enhance visual analysis prompt**: Added error-bar, fit-parameter, goodness-of-fit/residual and transformed-variable checks without allowing image-only theory judgments.
 
 ### Medium priority - Moderator improvements
-- [ ] **Add escalation criteria to moderator prompt**: Guidance for:
+- [x] **Add escalation criteria to moderator prompt**: Added guidance for:
   - Handling 3+ mark disagreements between examiners
   - Flagging borderline cases for human review
   - When to override both examiners if evidence contradicts their claims
-- [ ] **Add holistic assessment guidance**: Rubric descriptors are applied per-clause, but IB marking allows some holistic judgment. Add guidance on whether strong evidence in one area can compensate for weakness in another within the same criterion.
+- [x] **Add holistic assessment guidance**: Added best-fit assessment within each criterion while prohibiting compensation across criteria.
 
 ### Low priority - Additional improvements
-- [ ] **Add quantitative thresholds where possible**: The rubric uses terms like "appropriate" and "sufficient" without numbers. Add guidance such as:
-  - "Appropriate number of trials" typically means ≥5 repeats
-  - "Appropriate uncertainty" typically means percentage uncertainties <10% for main measurements
-  - "Sufficient data range" typically means ≥5 data points spanning the independent variable
+- [x] **Avoid unofficial universal thresholds**: Current IB examiner guidance requires quantity,
+  range, repetition and uncertainty treatment to be judged in the context of the investigation.
+  Production prompts now explicitly prohibit invented fixed cut-offs.
 - [ ] **Add common pitfall warnings**: Flag common student errors that affect specific criteria:
   - Research Design: Confusing aim with research question, missing control variables
   - Data Analysis: Inconsistent significant figures, missing uncertainty on processed data

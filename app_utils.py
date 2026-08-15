@@ -1,6 +1,14 @@
 import re
 from typing import Iterable
 
+
+CRITERION_NAMES = (
+    "Research design",
+    "Data analysis",
+    "Conclusion",
+    "Evaluation",
+)
+
 PROMPT_QA_MARKER = "# Prompt QA resolution"
 PROMPT_QA_RULES = [
     {
@@ -162,3 +170,49 @@ def sample_evenly(items: Iterable[object], limit: int) -> list[object]:
             if len(unique_indices) == limit:
                 break
     return [items_list[index] for index in unique_indices]
+
+
+def extract_report_scores(report: str) -> dict[str, int]:
+    """Extract final/awarded criterion marks from a generated Markdown report."""
+    scores: dict[str, int] = {}
+    for criterion in CRITERION_NAMES:
+        heading_pattern = re.compile(
+            rf"^###\s+{re.escape(criterion)}\s*(?:[—-]|\().*?(\d)\s*/\s*6",
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+        heading_match = heading_pattern.search(report)
+        if heading_match:
+            scores[criterion] = int(heading_match.group(1))
+            continue
+
+        table_pattern = re.compile(
+            rf"^\|\s*\**{re.escape(criterion)}\**\s*\|(?P<cells>.+)$",
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+        table_match = table_pattern.search(report)
+        if table_match:
+            marks = [
+                int(value)
+                for value in re.findall(r"(?<!\d)([0-6])(?:\s*/\s*6)?(?!\d)", table_match.group("cells"))
+            ]
+            if marks:
+                # Moderator tables place the final mark after both examiner marks.
+                scores[criterion] = marks[2] if len(marks) >= 3 else marks[0]
+    return scores
+
+
+def build_combined_report(
+    examiner1_report: str,
+    examiner2_report: str,
+    moderator_report: str,
+) -> str:
+    """Create a single downloadable Markdown bundle from completed reports."""
+    sections = ["# IB DP Physics IA assessment bundle"]
+    for title, report in (
+        ("Examiner 1 — Experimentalist", examiner1_report),
+        ("Examiner 2 — Data & Physics Analyst", examiner2_report),
+        ("Chief Moderator — Final decision", moderator_report),
+    ):
+        if report.strip():
+            sections.extend([f"## {title}", report.strip()])
+    return "\n\n---\n\n".join(sections) + "\n"

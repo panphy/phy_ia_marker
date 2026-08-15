@@ -1,8 +1,27 @@
-# IB Physics IA Criteria (Extracted fromthe Official Subject Guide)
+# IB DP Physics Scientific Investigation Criteria
 
-## Source
-- Document: Physics guide (2025)
-- Pages used: 72–75
+## Source and currency
+- Authoritative rubric: *Physics guide* (published February 2023, updated November 2024),
+  first assessment 2025, pp. 72–75.
+- Currency check: IB *Examiner Instructions 2026 — Sciences — Physics* continues to use
+  this guide and the same four-criterion, 24-mark assessment model.
+- Applies equally to SL and HL.
+
+## Current-session application notes
+These notes clarify how the rubric is applied; they do not replace or add criteria.
+
+- Use a holistic, best-fit judgment within each criterion. A report may show qualities from
+  adjacent bands; award the mark that most fairly reflects the evidence as a whole.
+- The quantity, range and repetition of data must be appropriate to the particular investigation.
+  Do not impose a universal minimum number of trials or data points.
+- Full calculations are not expected throughout; representative working may be sufficient.
+  Do not require a worked example merely because a spreadsheet or programmable calculator was used.
+- A designed procedure should let a reader reproduce the investigation **in principle**.
+- Manipulative skill is not assessed. Safety, ethics and environmental impact are considered under
+  Research design only where relevant.
+- Investigations using secondary data should consider the uncertainty associated with those data
+  where possible.
+- Do not reward or penalize features that are not part of the published criterion being assessed.
 
 ## Criteria Overview
 - Research design (max: 6) — (Guide p. 72)
