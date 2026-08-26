@@ -830,7 +830,7 @@ st.markdown(
         color: white;
         background: linear-gradient(125deg, #24124f 0%, #51309a 58%, #087f74 130%);
         box-shadow: 0 18px 45px rgba(36,18,79,.15);
-        margin-bottom: 1.4rem;
+        margin: 1.5rem 0 1.4rem;
     }
     .hero-kicker { font-size: .77rem; font-weight: 700; letter-spacing: .12em; opacity: .78; }
     .hero h1 { color: white; font-size: clamp(2rem, 4vw, 3.35rem); margin: .42rem 0 .5rem; }
