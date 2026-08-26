@@ -855,6 +855,29 @@ st.markdown(
     .stFormSubmitButton button:hover { color: #fff; background: linear-gradient(100deg, #53389e, #6941c6); }
     [data-testid="stMetric"] { background: #fff; border: 1px solid #eaecf0; border-radius: 14px; padding: .8rem 1rem; }
     .privacy-note { color: #475467; font-size: .82rem; line-height: 1.45; padding: .8rem; background: #f2f4f7; border-radius: 12px; }
+    div[role="dialog"]:has(.marking-dialog-content) {
+        border: 1px solid rgba(105,65,198,.18);
+        border-radius: 22px;
+        box-shadow: 0 24px 70px rgba(36,18,79,.22);
+    }
+    .marking-dialog-content { text-align: center; padding: .35rem .25rem .6rem; }
+    .marking-dialog-content p { color: #475467; line-height: 1.5; margin: .15rem auto .35rem; }
+    .marking-dialog-content small { color: #667085; }
+    .marking-dots { display: flex; justify-content: center; gap: .42rem; margin: .2rem 0 1.1rem; }
+    .marking-dots span {
+        width: .62rem;
+        height: .62rem;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #6941c6, #0e9384);
+        animation: marking-dot-pulse 1.35s ease-in-out infinite;
+    }
+    .marking-dots span:nth-child(2) { animation-delay: .16s; }
+    .marking-dots span:nth-child(3) { animation-delay: .32s; }
+    @keyframes marking-dot-pulse {
+        0%, 70%, 100% { opacity: .32; transform: translateY(0) scale(.82); }
+        35% { opacity: 1; transform: translateY(-.28rem) scale(1); }
+    }
+    @media (prefers-reduced-motion: reduce) { .marking-dots span { animation: none; opacity: .7; } }
     @media (max-width: 760px) { .step-row { grid-template-columns: 1fr 1fr; } .hero { padding: 1.4rem; } }
     </style>
     """,
@@ -877,6 +900,20 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+
+@st.dialog("AI is marking...", width="small", dismissible=False)
+def show_marking_overlay() -> None:
+    st.markdown(
+        """
+        <div class="marking-dialog-content" role="status" aria-live="polite" aria-busy="true">
+          <div class="marking-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+          <p>The examiners are reviewing the evidence and applying the rubric.</p>
+          <small>This may take a few minutes. Please keep this page open.</small>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def require_password() -> None:
@@ -953,6 +990,9 @@ inputs_disabled = st.session_state.is_processing
 if st.session_state.processing_error:
     st.error(st.session_state.processing_error)
     st.session_state.processing_error = None
+
+if inputs_disabled:
+    show_marking_overlay()
 
 with st.sidebar:
     st.markdown(
@@ -1685,6 +1725,7 @@ if has_any_report:
             data=combined_report,
             file_name="physics_ia_assessment_bundle.md",
             mime="text/markdown",
+            disabled=inputs_disabled,
             use_container_width=True,
         )
     with download_columns[1]:
@@ -1693,7 +1734,7 @@ if has_any_report:
             data=st.session_state.moderator_report,
             file_name="physics_ia_final_decision.md",
             mime="text/markdown",
-            disabled=not st.session_state.moderator_report,
+            disabled=inputs_disabled or not st.session_state.moderator_report,
             use_container_width=True,
         )
 
