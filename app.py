@@ -48,9 +48,13 @@ PASSWORD_ATTEMPT_WINDOW_SECONDS = 300
 OCR_CONFIDENCE_WARNING_THRESHOLD = 60.0
 MAX_VISUALS_PER_ANALYSIS = 12
 MAX_UNCAPTIONED_VISUALS = 4
-PANPHY_ASSETS_BASE_URL = "https://panphy.github.io/assets"
-PANPHY_LOGO_URL = f"{PANPHY_ASSETS_BASE_URL}/panphy-logo.png"
-PANPHY_FAVICON_URL = f"{PANPHY_ASSETS_BASE_URL}/panphy-favicon.png"
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+PANPHY_LOGO_PATH = ASSETS_DIR / "panphy.png"
+PANPHY_FAVICON_PATH = ASSETS_DIR / "favicon.png"
+PANPHY_LOGO_DATA_URI = (
+    "data:image/png;base64,"
+    + base64.b64encode(PANPHY_LOGO_PATH.read_bytes()).decode("ascii")
+)
 
 # -------------------------
 # Prompt templates (loaded from files)
@@ -796,7 +800,11 @@ def maybe_digest(
 # -------------------------
 # Streamlit UI
 # -------------------------
-st.set_page_config(page_title=APP_TITLE, page_icon=PANPHY_FAVICON_URL, layout="wide")
+st.set_page_config(
+    page_title=APP_TITLE,
+    page_icon=PANPHY_FAVICON_PATH.read_bytes(),
+    layout="wide",
+)
 st.markdown(
     """
     <style>
@@ -807,7 +815,11 @@ st.markdown(
             radial-gradient(circle at 92% 4%, rgba(14,147,132,.07), transparent 28rem),
             #f7f8fc;
     }
-    [data-testid="stHeader"] { background: transparent; }
+    [data-testid="stHeader"] {
+        background: rgba(255,255,255,.98);
+        border-bottom: 1px solid #e4e7ec;
+        box-shadow: 0 2px 12px rgba(16,24,40,.08);
+    }
     [data-testid="stSidebar"] { background: #ffffff; border-right: 1px solid #eaecf0; }
     .block-container { max-width: 1240px; padding-top: 2.2rem; padding-bottom: 4rem; }
     h1, h2, h3 { color: var(--ink); letter-spacing: -.02em; }
@@ -944,10 +956,10 @@ if st.session_state.processing_error:
 
 with st.sidebar:
     st.markdown(
-        """
+        f"""
         <div style="display:flex;align-items:center;gap:.65rem;margin:.15rem 0 1.35rem">
-          <div style="width:34px;height:34px;border-radius:11px;display:grid;place-items:center;
-          color:white;font-weight:800;background:linear-gradient(135deg,#6941c6,#0e9384)">P</div>
+          <img src="{PANPHY_LOGO_DATA_URI}" alt="PanPhy logo"
+          style="width:40px;height:40px;border-radius:9px;object-fit:cover" />
           <div style="font-weight:800;letter-spacing:.08em;color:#182033">PANPHY LABS</div>
         </div>
         """,
