@@ -10,6 +10,7 @@ Modern Streamlit workspace for reviewing IB DP Physics scientific investigations
 - **Digest mode** for large IAs to fit within model context limits (auto-triggers over a size threshold).
 - **Original PDF visuals supplied directly to marking calls**, with source-page labels and a reviewable preview.
 - **Coverage reporting** that flags missing text, OCR confidence, and unresolved figure/table labels.
+- **Instruction screening** that withholds likely marker-directed text or visuals and requires teacher review of flagged IAs.
 - **One-click complete assessment**, stage-by-stage reruns, score cards and downloadable Markdown reports.
 - **Password gate + cooldown** to reduce unauthorized access attempts.
 
@@ -55,6 +56,7 @@ Install `requirements.txt`, then run `streamlit run app.py` or `pytest tests/`. 
 3. The app builds a page index and exact candidate excerpts for rubric areas; these are navigation aids, not verified claims. A primary marker applies all four criteria and cites original pages.
 4. An evidence auditor checks the primary claims against the IA and attached original visuals.
 5. Exact agreement with no evidence warning is finalized after audit. A mark difference, audit concern or coverage gap goes to the Chief Moderator.
+6. Suspected instructions aimed at the marker, or selected visuals that cannot be screened, prevent automatic sign-off. The app shows provisional marks and requires a teacher to inspect the original PDF.
 
 ## Rubric currency
 The bundled rubric is sourced from the *Physics guide* (February 2023, updated November 2024), first assessment 2025. The IB's 2026 Physics examiner instructions continue to use the same four criteria and 24-mark structure. Current-session application notes are recorded in `criteria/ib_phy_ia_criteria.md`.
@@ -70,6 +72,7 @@ The bundled rubric is sourced from the *Physics guide* (February 2023, updated N
 - Vector graphics are rasterized per page; low-resolution source PDFs can still limit chart/table readability.
 - OCR confidence warnings and “no-text” page flags are intended to prevent over-reliance on unreadable content.
 - Source-image selection is capped at six images per assessment. The auditor is instructed to request escalation if a necessary visual was not supplied or is unreadable.
+- Instruction screening is heuristic. It can miss disguised or poorly extracted text, so all marks still need a check against the original IA before use.
 
 ## Calibration against human marks
 

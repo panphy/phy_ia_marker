@@ -10,6 +10,8 @@ from pypdf.errors import PdfReadError
 import pytesseract
 from pytesseract.pytesseract import TesseractError, TesseractNotFoundError
 
+from app_utils import scan_injection_phrases
+
 
 @dataclass(frozen=True)
 class PageExtractionDiagnostic:
@@ -65,6 +67,31 @@ def prepare_source_images(visuals: list[ExtractedVisual]) -> list[SourceImage]:
         if visual.kind == "vector":
             rendered_vector_pages.add(visual.page_number)
     return prepared
+
+
+def screen_source_images(
+    images: list[SourceImage], language: str
+) -> tuple[list[SourceImage], list[dict[str, object]], list[int]]:
+    """Withhold visuals with marker-directed text or an incomplete OCR screen."""
+    safe_images: list[SourceImage] = []
+    findings: list[dict[str, object]] = []
+    unscanned_pages: list[int] = []
+    for source in images:
+        try:
+            with Image.open(io.BytesIO(source.png_data)) as image:
+                visible_text = pytesseract.image_to_string(image, lang=language)
+        except (OSError, TesseractNotFoundError, TesseractError):
+            unscanned_pages.append(source.page_number)
+            continue
+        matches = scan_injection_phrases(visible_text, page_number=source.page_number)
+        if matches:
+            findings.extend(
+                {"source": "visual", "page_number": source.page_number, "kind": match["kind"]}
+                for match in matches
+            )
+        else:
+            safe_images.append(source)
+    return safe_images, findings, sorted(set(unscanned_pages))
 
 
 @dataclass

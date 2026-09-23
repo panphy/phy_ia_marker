@@ -19,6 +19,70 @@ EVIDENCE_TERMS = {
     "Evaluation": r"evaluation|limitation|weakness|improvement|systematic error|random error|reliab|validity",
 }
 
+INJECTION_DIRECTIVE_PATTERNS = {
+    "instruction_override": (
+        r"\b(?:ignore|disregard|forget|override)\s+"
+        r"(?:(?:all|any|previous|prior|earlier|original|above|the|these|your|of)\s+){0,8}"
+        r"(?:instructions?|prompts?|rules?|rubric|criteria)\b"
+    ),
+    "mark_command": (
+        r"\b(?:give|award|assign|set|score|mark|grade)\b[^\n.!?]{0,80}"
+        r"\b(?:full|maximum|perfect|top)\s+(?:marks?|score|points?)\b"
+    ),
+    "perfect_score_command": (
+        r"\b(?:give|award|assign|set|score|mark|grade)\b[^\n.!?]{0,80}"
+        r"\b(?:24\s*/\s*24|6\s*/\s*6)\b"
+    ),
+    "role_spoofing": (
+        r"\b(?:you are now|act as|assume the role of)\s+(?:the\s+)?"
+        r"(?:system|developer|examiner|marker|moderator|grader|assistant)\b"
+    ),
+    "prompt_reference": r"\b(?:system prompt|developer message|jailbreak)\b",
+}
+
+
+def scan_injection_phrases(text: str, page_number: int | None = None) -> list[dict[str, object]]:
+    """Find likely instructions addressed to the marker, without treating IA text as authority."""
+    page_markers = list(re.finditer(r"--- Page (\d+) ---", text)) if page_number is None else []
+    matches: list[dict[str, object]] = []
+    for kind, pattern in INJECTION_DIRECTIVE_PATTERNS.items():
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            preceding = [marker for marker in page_markers if marker.start() <= match.start()]
+            page = page_number if page_number is not None else (
+                int(preceding[-1].group(1)) if preceding else None
+            )
+            matches.append(
+                {"kind": kind, "start": match.start(), "end": match.end(), "page_number": page}
+            )
+    return sorted(matches, key=lambda item: int(item["start"]))
+
+
+def redact_injection_spans(text: str, matches: list[dict[str, object]]) -> str:
+    """Remove each suspect line, including instructions after the matched phrase."""
+    spans: list[tuple[int, int]] = []
+    for match in matches:
+        start = text.rfind("\n", 0, int(match["start"])) + 1
+        end = text.find("\n", int(match["end"]))
+        spans.append((start, len(text) if end < 0 else end))
+    merged: list[list[int]] = []
+    for start, end in sorted(set(spans)):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    for start, end in reversed(merged):
+        text = text[:start] + "[Potential instruction directed at marker removed]" + text[end:]
+    return text
+
+
+def require_human_review(report: str, reason: str) -> str:
+    """Apply a deterministic review flag to a model report after validation."""
+    review_line = f"- **Human review recommended:** yes — {reason}"
+    pattern = r"(?im)^-\s*\*{0,2}Human review recommended:\*{0,2}\s*(?:yes|no)\b[^\n]*"
+    if re.search(pattern, report):
+        return re.sub(pattern, lambda _: review_line, report, count=1)
+    return f"## Mandatory human review\n{review_line}\n\n{report}"
+
 PROMPT_QA_MARKER = "# Prompt QA resolution"
 PROMPT_QA_RULES = [
     {
@@ -243,6 +307,7 @@ def moderation_reasons(
     coverage_warnings: list[str],
     visual_error: bool,
     visuals_without_source_images: bool,
+    injection_review_required: bool = False,
 ) -> list[str]:
     primary = extract_report_scores(primary_report)
     audited = extract_report_scores(audit_report)
@@ -263,6 +328,8 @@ def moderation_reasons(
         reasons.append("Visual analysis failed")
     if visuals_without_source_images:
         reasons.append("A relevant original visual was not supplied to the marking calls")
+    if injection_review_required:
+        reasons.append("Possible marker-directed instructions or unscreened visuals require teacher review")
     return reasons
 
 
