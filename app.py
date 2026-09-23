@@ -978,7 +978,7 @@ def require_password() -> None:
                     submitted = st.form_submit_button(
                         "Continue",
                         type="primary",
-                        use_container_width=True,
+                        width="stretch",
                     )
         if submitted:
             accepted, remaining = throttle.try_password(password, configured_password)
@@ -1598,7 +1598,7 @@ run_full = st.button(
     type="primary",
     disabled=inputs_disabled or not ia_file,
     help="Extract evidence, mark the IA, audit the evidence, then moderate flagged cases.",
-    use_container_width=True,
+    width="stretch",
 )
 st.caption("A complete run makes several model calls and may take a few minutes.")
 
@@ -1608,19 +1608,19 @@ with st.expander("Advanced · run or repeat one stage"):
         run_examiner1 = st.button(
             "Run primary mark",
             disabled=inputs_disabled or not ia_file,
-            use_container_width=True,
+            width="stretch",
         )
     with columns[1]:
         run_examiner2 = st.button(
             "Run evidence audit",
             disabled=inputs_disabled or not ia_file or not primary_ready,
-            use_container_width=True,
+            width="stretch",
         )
     with columns[2]:
         run_moderator = st.button(
             "Run Chief Moderator",
             disabled=inputs_disabled or not ia_file or not reports_ready,
-            use_container_width=True,
+            width="stretch",
         )
 
 selected_action = None
@@ -1865,7 +1865,7 @@ if has_any_report:
             file_name="physics_ia_assessment_bundle.md",
             mime="text/markdown",
             disabled=inputs_disabled,
-            use_container_width=True,
+            width="stretch",
         )
     with download_columns[1]:
         st.download_button(
@@ -1874,7 +1874,7 @@ if has_any_report:
             file_name="physics_ia_final_decision.md",
             mime="text/markdown",
             disabled=inputs_disabled or not st.session_state.moderator_report,
-            use_container_width=True,
+            width="stretch",
         )
     with download_columns[2]:
         if ia_file:
@@ -1884,7 +1884,7 @@ if has_any_report:
                 file_name=ia_file.name,
                 mime="application/pdf",
                 disabled=inputs_disabled,
-                use_container_width=True,
+                width="stretch",
             )
 
     final_tab, examiner1_tab, examiner2_tab, evidence_tab = st.tabs(
@@ -1935,7 +1935,7 @@ if has_any_report:
                 st.dataframe(
                     format_page_diagnostics(st.session_state.ia_page_diagnostics),
                     hide_index=True,
-                    use_container_width=True,
+                    width="stretch",
                 )
             if st.session_state.ia_visual_analysis:
                 with st.expander("Graph, table and diagram analysis"):
@@ -1946,7 +1946,7 @@ if has_any_report:
                         st.image(
                             source_image.png_data,
                             caption=f"Page {source_image.page_number} · {source_image.name}",
-                            use_container_width=True,
+                            width="stretch",
                         )
 
     with st.expander("Technical details"):
@@ -1968,7 +1968,7 @@ if has_any_report:
                 data=json.dumps(evaluation_record, indent=2),
                 file_name="physics_ia_scoring_record.json",
                 mime="application/json",
-                use_container_width=True,
+                width="stretch",
             )
             st.caption("Contains marks and run statistics, without the student PDF or report text.")
 elif st.session_state.ia_page_diagnostics:
