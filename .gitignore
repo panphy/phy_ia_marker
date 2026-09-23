@@ -18,6 +18,9 @@ env/
 .env.*
 .streamlit/secrets.toml
 
+# Local shell convenience
+.zsh-auto-venv.zsh
+
 # Packaging artifacts
 build/
 dist/
