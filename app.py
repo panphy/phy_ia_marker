@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import json
 import os
 import re
 import time
@@ -12,11 +13,19 @@ from openai import APIConnectionError, APIError, APITimeoutError, RateLimitError
 from streamlit.errors import StreamlitSecretNotFoundError
 
 from app_utils import (
+    LoginThrottle,
     apply_prompt_qa,
+    build_agreed_decision,
+    build_candidate_evidence_ledger,
     build_combined_report,
+    build_evaluation_record,
+    build_page_evidence_index,
+    build_model_input,
     chunk_pages,
     extract_report_scores,
-    report_has_expected_citations,
+    moderation_reasons,
+    report_page_issues,
+    report_validation_issues,
     sample_evenly,
     split_pages,
 )
@@ -25,15 +34,18 @@ from pdf_utils import (
     PageExtractionDiagnostic,
     PdfExtractionError,
     PdfPasswordRequiredError,
+    SourceImage,
+    attach_unambiguous_captions,
     extract_pdf_text,
+    prepare_source_images,
 )
 
 # -------------------------
 # Config
 # -------------------------
 APP_TITLE = "IB DP Physics IA Marker"
-DEFAULT_MODEL = "gpt-5.6-sol"
-DEFAULT_VISION_MODEL = "gpt-5.6-terra"
+DEFAULT_MODEL = "gpt-6-sol"
+DEFAULT_VISION_MODEL = "gpt-6-sol"
 MARKING_REASONING_EFFORT = "high"
 DIGEST_REASONING_EFFORT = "low"
 VISION_REASONING_EFFORT = "medium"
@@ -48,6 +60,7 @@ PASSWORD_ATTEMPT_WINDOW_SECONDS = 300
 OCR_CONFIDENCE_WARNING_THRESHOLD = 60.0
 MAX_VISUALS_PER_ANALYSIS = 12
 MAX_UNCAPTIONED_VISUALS = 4
+MAX_SOURCE_IMAGES = 6
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 PANPHY_LOGO_PATH = ASSETS_DIR / "panphy.png"
 PANPHY_FAVICON_PATH = ASSETS_DIR / "favicon.png"
@@ -87,8 +100,10 @@ INJECTION_PHRASE_PATTERNS = [
 # PDF extraction
 # -------------------------
 def show_pdf_error(message: str) -> None:
-    st.error(message)
-    st.stop()
+    st.session_state.pending_action = None
+    st.session_state.is_processing = False
+    st.session_state.processing_error = message
+    st.rerun()
 
 
 # -------------------------
@@ -137,20 +152,24 @@ def call_llm(
     *,
     reasoning_effort: str = MARKING_REASONING_EFFORT,
     verbosity: str = "medium",
+    source_images: list[SourceImage] | None = None,
+    usage_stage: str = "text",
 ) -> str:
     try:
         request_args = {
             "model": model,
             "instructions": instructions,
-            "input": user_input,
+            "input": build_model_input(user_input, source_images or []),
             "store": STORE_RESPONSES,
             "reasoning": {"effort": reasoning_effort},
             "text": {"verbosity": verbosity},
             "max_output_tokens": REPORT_MAX_OUTPUT_TOKENS,
         }
+        started_at = time.perf_counter()
         resp = client.responses.create(
             **request_args,
         )
+        record_model_usage(resp, model, usage_stage, time.perf_counter() - started_at)
     except RateLimitError as exc:
         raise LLMError(
             user_message="API error: rate limited, try again in 30 seconds.",
@@ -175,7 +194,42 @@ def call_llm(
                 "status_code": getattr(exc, "status_code", None),
             },
         ) from exc
-    return (resp.output_text or "").strip()
+    if getattr(resp, "status", None) == "incomplete":
+        raise LLMError(
+            user_message="The model stopped before finishing its response. Please retry this stage.",
+            debug_info={"error_type": "incomplete_response", "model": model},
+        )
+    output = (resp.output_text or "").strip()
+    if not output:
+        raise LLMError(
+            user_message="The model returned no text. Please retry this stage.",
+            debug_info={"error_type": "empty_response", "model": model},
+        )
+    return output
+
+
+def record_model_usage(response: object, model: str, stage: str, seconds: float) -> None:
+    usage = getattr(response, "usage", None)
+    if "usage_log" not in st.session_state:
+        st.session_state.usage_log = []
+    st.session_state.usage_log.append(
+        {
+            "stage": stage,
+            "model": model,
+            "input_tokens": getattr(usage, "input_tokens", 0),
+            "output_tokens": getattr(usage, "output_tokens", 0),
+            "seconds": round(seconds, 2),
+        }
+    )
+
+
+def require_valid_report(report: str, label: str, used_digest: bool, page_count: int) -> None:
+    issues = report_validation_issues(report, used_digest) + report_page_issues(report, page_count)
+    if issues:
+        raise LLMError(
+            user_message=f"{label} needs another run: {' '.join(issues)}",
+            debug_info={"error_type": "incomplete_report", "stage": label, "issues": issues},
+        )
 
 
 def call_vision_llm(
@@ -191,6 +245,7 @@ def call_vision_llm(
     media_type = f"image/{(image_format or 'png').lower()}"
     image_url = f"data:{media_type};base64,{base64_image}"
     try:
+        started_at = time.perf_counter()
         resp = client.responses.create(
             model=model,
             input=[
@@ -207,6 +262,7 @@ def call_vision_llm(
             text={"verbosity": "low"},
             max_output_tokens=2_000,
         )
+        record_model_usage(resp, model, "visual analysis", time.perf_counter() - started_at)
     except (RateLimitError, APITimeoutError, TimeoutError, APIConnectionError, APIError) as exc:
         raise LLMError(
             user_message="API error: visual analysis failed. Try again shortly.",
@@ -365,7 +421,7 @@ def build_coverage_report(
     report_lines = [
         "Content coverage report (auto-generated):",
         f"- Total pages: {total_pages}",
-        f"- Pages with selectable text: {total_pages - len(no_text_pages) - len(ocr_pages)}",
+        f"- Pages with selectable text: {sum(diag.has_text for diag in diagnostics)}",
         f"- Pages with OCR text: {len(ocr_pages)}",
         f"- Pages with no extractable text: {len(no_text_pages)}",
         f"- Pages with embedded images detected: {len(image_pages)}",
@@ -417,7 +473,9 @@ def build_coverage_report(
 def format_page_diagnostics(diagnostics: list[PageExtractionDiagnostic]) -> list[dict[str, object]]:
     rows = []
     for diag in diagnostics:
-        if diag.has_text:
+        if diag.has_text and diag.used_ocr:
+            source = "Text + OCR"
+        elif diag.has_text:
             source = "Text"
         elif diag.used_ocr:
             source = "OCR"
@@ -890,7 +948,7 @@ st.markdown(
       <div class="hero-kicker">PANPHY LABS · ASSESSMENT WORKSPACE</div>
       <h1>Physics IA Review</h1>
       <p>Evidence-led marking for the current IB DP Physics scientific investigation,
-      combining two independent specialist reviews with chief-moderator adjudication.</p>
+      combining a rubric-based mark, an evidence audit and targeted moderation.</p>
       <div class="hero-meta">
         <span class="hero-pill">4 criteria · 24 marks</span>
         <span class="hero-pill">OCR + visual coverage checks</span>
@@ -908,12 +966,17 @@ def show_marking_overlay() -> None:
         """
         <div class="marking-dialog-content" role="status" aria-live="polite" aria-busy="true">
           <div class="marking-dots" aria-hidden="true"><span></span><span></span><span></span></div>
-          <p>The examiners are reviewing the evidence and applying the rubric.</p>
+          <p>The marker is reviewing the IA and the auditor is checking the evidence.</p>
           <small>This may take a few minutes. Please keep this page open.</small>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+
+@st.cache_resource
+def get_login_throttle() -> LoginThrottle:
+    return LoginThrottle(MAX_PASSWORD_ATTEMPTS, PASSWORD_ATTEMPT_WINDOW_SECONDS)
 
 
 def require_password() -> None:
@@ -926,27 +989,11 @@ def require_password() -> None:
 
     if "password_ok" not in st.session_state:
         st.session_state.password_ok = False
-    if "failed_attempts" not in st.session_state:
-        st.session_state.failed_attempts = 0
-    if "last_failed_at" not in st.session_state:
-        st.session_state.last_failed_at = None
-
-    now = time.time()
-    if st.session_state.last_failed_at:
-        elapsed_since_fail = now - st.session_state.last_failed_at
-        if elapsed_since_fail > PASSWORD_ATTEMPT_WINDOW_SECONDS:
-            st.session_state.failed_attempts = 0
-            st.session_state.last_failed_at = None
-
     if not st.session_state.password_ok:
-        if (
-            st.session_state.failed_attempts >= MAX_PASSWORD_ATTEMPTS
-            and st.session_state.last_failed_at
-            and (now - st.session_state.last_failed_at) < PASSWORD_ATTEMPT_WINDOW_SECONDS
-        ):
-            remaining = int(PASSWORD_ATTEMPT_WINDOW_SECONDS - (now - st.session_state.last_failed_at))
-            st.error("Too many failed attempts. Please wait before trying again.")
-            st.info(f"Cooldown remaining: {remaining} seconds.")
+        throttle = get_login_throttle()
+        remaining = throttle.cooldown_remaining()
+        if remaining:
+            st.error(f"Too many failed attempts across the workspace. Try again in {remaining} seconds.")
             st.stop()
 
         _, login_column, _ = st.columns([1, 1.15, 1])
@@ -966,14 +1013,13 @@ def require_password() -> None:
                         use_container_width=True,
                     )
         if submitted:
-            if password == configured_password:
+            accepted, remaining = throttle.try_password(password, configured_password)
+            if accepted:
                 st.session_state.password_ok = True
-                st.session_state.failed_attempts = 0
-                st.session_state.last_failed_at = None
                 st.rerun()
+            elif remaining:
+                st.error(f"Too many failed attempts across the workspace. Try again in {remaining} seconds.")
             else:
-                st.session_state.failed_attempts += 1
-                st.session_state.last_failed_at = now
                 st.error("Incorrect password.")
         st.stop()
 
@@ -1019,6 +1065,7 @@ with st.sidebar:
     #     help="This app is set to store=false by default in code. Toggle in code if you want storage.",
     # )
     enable_ocr = st.toggle("Read scanned pages with OCR", value=True, disabled=inputs_disabled)
+    st.caption("Also checks image-heavy pages that contain only a short selectable header.")
     ocr_language = st.text_input(
         "OCR language code",
         value="eng",
@@ -1026,7 +1073,8 @@ with st.sidebar:
         help="Tesseract language code, for example eng.",
     )
     enable_visual_analysis = st.checkbox(
-        "Analyse graphs, tables and diagrams", value=True, disabled=inputs_disabled
+        "Create extra visual summaries", value=False, disabled=inputs_disabled,
+        help="Optional extra model calls. Selected original visuals are supplied directly to the marker and auditor either way.",
     )
     vision_model = DEFAULT_VISION_MODEL
     pdf_password = st.text_input(
@@ -1067,14 +1115,30 @@ if "ia_coverage_warnings" not in st.session_state:
     st.session_state.ia_coverage_warnings = []
 if "ia_extracted_visuals" not in st.session_state:
     st.session_state.ia_extracted_visuals = []
+if "ia_source_images" not in st.session_state:
+    st.session_state.ia_source_images = []
+if "ia_caption_pages" not in st.session_state:
+    st.session_state.ia_caption_pages = []
+if "ia_evidence_index" not in st.session_state:
+    st.session_state.ia_evidence_index = ""
+if "ia_evidence_ledger" not in st.session_state:
+    st.session_state.ia_evidence_ledger = ""
 if "ia_visual_analysis" not in st.session_state:
     st.session_state.ia_visual_analysis = ""
+if "moderation_reasons" not in st.session_state:
+    st.session_state.moderation_reasons = []
+if "decision_mode" not in st.session_state:
+    st.session_state.decision_mode = ""
+if "usage_log" not in st.session_state:
+    st.session_state.usage_log = []
 if "pending_action" not in st.session_state:
     st.session_state.pending_action = None
 if "criteria_text" not in st.session_state:
     st.session_state.criteria_text = ""
 if "last_upload_key" not in st.session_state:
     st.session_state.last_upload_key = None
+if "last_settings_key" not in st.session_state:
+    st.session_state.last_settings_key = None
 
 
 def reset_reports() -> None:
@@ -1087,8 +1151,23 @@ def reset_reports() -> None:
     st.session_state.ia_page_diagnostics = []
     st.session_state.ia_coverage_warnings = []
     st.session_state.ia_extracted_visuals = []
+    st.session_state.ia_source_images = []
+    st.session_state.ia_caption_pages = []
+    st.session_state.ia_evidence_index = ""
+    st.session_state.ia_evidence_ledger = ""
     st.session_state.ia_visual_analysis = ""
+    st.session_state.moderation_reasons = []
+    st.session_state.decision_mode = ""
+    st.session_state.usage_log = []
     st.session_state.pending_action = None
+
+
+current_settings_key = (enable_ocr, ocr_language, enable_visual_analysis, pdf_password)
+if st.session_state.last_settings_key is None:
+    st.session_state.last_settings_key = current_settings_key
+elif st.session_state.last_settings_key != current_settings_key:
+    reset_reports()
+    st.session_state.last_settings_key = current_settings_key
 
 
 def record_llm_error(context: str, error: LLMError) -> None:
@@ -1199,24 +1278,11 @@ def ensure_documents(
             "They will be redacted before analysis."
         )
         ia_text = redact_injection_spans(ia_text, injection_matches)
+    evidence_ledger = build_candidate_evidence_ledger(ia_text)
 
     unresolved_labels = find_unresolved_labels(ia_text)
     page_captions = find_page_captions(ia_text)
-    visuals_with_captions = [
-        ExtractedVisual(
-            page_number=visual.page_number,
-            name=visual.name,
-            image_format=visual.image_format,
-            width=visual.width,
-            height=visual.height,
-            data=visual.data,
-            captions=tuple(page_captions.get(visual.page_number, [])),
-            kind=visual.kind,
-            rasterized_data=visual.rasterized_data,
-            rasterized_format=visual.rasterized_format,
-        )
-        for visual in ia_visuals
-    ]
+    visuals_with_captions = attach_unambiguous_captions(ia_visuals, page_captions)
     coverage_report = build_coverage_report(
         ia_diagnostics,
         unresolved_labels,
@@ -1231,6 +1297,15 @@ def ensure_documents(
         max_visuals=MAX_VISUALS_PER_ANALYSIS,
         max_uncaptioned=MAX_UNCAPTIONED_VISUALS,
     )
+    source_visuals = select_visuals_for_analysis(
+        visuals_with_captions,
+        max_visuals=MAX_SOURCE_IMAGES,
+        max_uncaptioned=MAX_UNCAPTIONED_VISUALS,
+    )
+    source_images = prepare_source_images(source_visuals)
+    if not any(diag.has_text or diag.used_ocr for diag in ia_diagnostics) and not source_images:
+        show_pdf_error("No readable IA evidence was found. Upload a clearer PDF or enable OCR before marking.")
+    evidence_index = build_page_evidence_index(ia_diagnostics, visuals_with_captions, source_images)
     if enable_visual_analysis and visuals_with_captions:
         with st.spinner("Analyzing visuals (vision model)..."):
             try:
@@ -1283,6 +1358,7 @@ def ensure_documents(
             "ia_chars": len(ia_text),
             "criteria_chars": len(criteria_text),
             "ia_visuals_count": len(visuals_with_captions),
+            "source_images_supplied": [image.page_number for image in source_images],
             "ia_visuals_vector_count": len(
                 [visual for visual in visuals_with_captions if visual.kind == "vector"]
             ),
@@ -1325,7 +1401,112 @@ def ensure_documents(
     st.session_state.ia_page_diagnostics = ia_diagnostics
     st.session_state.ia_coverage_warnings = coverage_warnings
     st.session_state.ia_extracted_visuals = visuals_with_captions
+    st.session_state.ia_source_images = source_images
+    st.session_state.ia_caption_pages = list(page_captions)
+    st.session_state.ia_evidence_index = evidence_index
+    st.session_state.ia_evidence_ledger = evidence_ledger
     st.session_state.ia_visual_analysis = visual_analysis_text
+
+
+def run_primary_mark(client: OpenAI, model: str, ia_ready: AIResult) -> str:
+    prompt = EXAMINER1_PROMPT.format(
+        rubric_text=st.session_state.criteria_text,
+        ia_text=ia_ready.text,
+        evidence_index=st.session_state.ia_evidence_index,
+        evidence_ledger=st.session_state.ia_evidence_ledger,
+        coverage_report=st.session_state.ia_coverage_report,
+        visual_analysis=st.session_state.ia_visual_analysis,
+        digest_citation_guidance=build_digest_citation_guidance(ia_ready.used_digest),
+    )
+    report = call_llm(
+        client,
+        model=model,
+        instructions=(
+            "Act as the primary IB Physics IA marker. Apply all four rubric criteria by best fit, "
+            "cite original PDF pages for material claims, and return only the requested Markdown. "
+            f"{ANTI_INJECTION_INSTRUCTIONS} Original attached PDF visuals are source evidence."
+        ),
+        user_input=prompt,
+        source_images=st.session_state.ia_source_images,
+        usage_stage="primary mark",
+    )
+    require_valid_report(report, "Primary mark", ia_ready.used_digest, st.session_state.debug_info["ia_pages"])
+    return report
+
+
+def run_evidence_audit(client: OpenAI, model: str, ia_ready: AIResult) -> str:
+    prompt = EXAMINER2_PROMPT.format(
+        rubric_text=st.session_state.criteria_text,
+        ia_text=ia_ready.text,
+        evidence_index=st.session_state.ia_evidence_index,
+        evidence_ledger=st.session_state.ia_evidence_ledger,
+        coverage_report=st.session_state.ia_coverage_report,
+        visual_analysis=st.session_state.ia_visual_analysis,
+        primary_report=st.session_state.examiner1_report,
+        digest_citation_guidance=build_digest_citation_guidance(ia_ready.used_digest),
+    )
+    report = call_llm(
+        client,
+        model=model,
+        instructions=(
+            "Act as an evidence auditor. Check the primary marker's claims and marks against the "
+            "original IA, identify unsupported evidence, and recommend corrected marks only when "
+            "justified. Return only the requested Markdown. "
+            f"{ANTI_INJECTION_INSTRUCTIONS} Original attached PDF visuals are source evidence."
+        ),
+        user_input=prompt,
+        source_images=st.session_state.ia_source_images,
+        usage_stage="evidence audit",
+    )
+    require_valid_report(report, "Evidence audit", ia_ready.used_digest, st.session_state.debug_info["ia_pages"])
+    return report
+
+
+def current_moderation_reasons() -> list[str]:
+    visual_state = st.session_state.debug_info.get("visual_analysis", {})
+    supplied_pages = {image.page_number for image in st.session_state.ia_source_images}
+    visual_pages = {visual.page_number for visual in st.session_state.ia_extracted_visuals}
+    important_visual_missing = any(
+        page in visual_pages and page not in supplied_pages
+        for page in st.session_state.ia_caption_pages
+    )
+    return moderation_reasons(
+        st.session_state.examiner1_report,
+        st.session_state.examiner2_report,
+        st.session_state.ia_coverage_warnings,
+        bool(visual_state.get("error")),
+        (bool(st.session_state.ia_extracted_visuals) and not bool(st.session_state.ia_source_images))
+        or important_visual_missing,
+    )
+
+
+def run_chief_moderation(client: OpenAI, model: str, ia_ready: AIResult, reasons: list[str]) -> str:
+    prompt = MODERATOR_PROMPT.format(
+        rubric_text=st.session_state.criteria_text,
+        ia_text=ia_ready.text,
+        evidence_index=st.session_state.ia_evidence_index,
+        evidence_ledger=st.session_state.ia_evidence_ledger,
+        coverage_report=st.session_state.ia_coverage_report,
+        visual_analysis=st.session_state.ia_visual_analysis,
+        examiner1_report=st.session_state.examiner1_report,
+        examiner2_report=st.session_state.examiner2_report,
+        escalation_reasons="\n".join(f"- {reason}" for reason in reasons) or "Manual moderator review.",
+        digest_citation_guidance=build_digest_citation_guidance(ia_ready.used_digest),
+    )
+    report = call_llm(
+        client,
+        model=model,
+        instructions=(
+            "Act as Chief Moderator. Verify disputed evidence against the original IA and rubric, "
+            "adjudicate rather than average, and return only the requested Markdown. "
+            f"{ANTI_INJECTION_INSTRUCTIONS} Original attached PDF visuals are source evidence."
+        ),
+        user_input=prompt,
+        source_images=st.session_state.ia_source_images,
+        usage_stage="chief moderation",
+    )
+    require_valid_report(report, "Chief Moderator decision", ia_ready.used_digest, st.session_state.debug_info["ia_pages"])
+    return report
 
 
 st.markdown('<div class="section-label">New assessment</div>', unsafe_allow_html=True)
@@ -1346,11 +1527,11 @@ with workspace_right:
     with st.container(border=True):
         st.markdown("### How the decision is made")
         st.markdown(
-            "**1 · Experimentalist** checks design and reproducibility  \n"
-            "**2 · Data & Physics Analyst** checks processing and physical reasoning  \n"
-            "**3 · Chief Moderator** verifies evidence and adjudicates the final mark"
+            "**1 · Primary marker** applies the four rubric criteria  \n"
+            "**2 · Evidence auditor** checks claims, calculations and cited pages  \n"
+            "**3 · Chief Moderator** resolves disagreements or evidence gaps"
         )
-        st.caption("The two examiners work independently. The final mark is adjudicated, never averaged.")
+        st.caption("Exact agreement can be finalized after audit. Flagged cases are moderated; marks are never averaged.")
 
 if ia_file:
     ia_bytes = ia_file.getvalue()
@@ -1361,16 +1542,23 @@ if ia_file:
     if st.session_state.last_upload_key != current_upload_key:
         reset_reports()
         st.session_state.last_upload_key = current_upload_key
+elif st.session_state.last_upload_key is not None:
+    reset_reports()
+    st.session_state.last_upload_key = None
 
-reports_ready = bool(st.session_state.examiner1_report.strip()) and bool(
-    st.session_state.examiner2_report.strip()
+primary_ready = not report_validation_issues(
+    st.session_state.examiner1_report, st.session_state.ia_used_digest
+)
+reports_ready = all(
+    not report_validation_issues(report, st.session_state.ia_used_digest)
+    for report in (st.session_state.examiner1_report, st.session_state.examiner2_report)
 )
 
 step_states = [
     ("1", "Upload", bool(ia_file)),
     ("2", "Extract", bool(st.session_state.doc_cache_key)),
-    ("3", "Cross-mark", reports_ready),
-    ("4", "Moderate", bool(st.session_state.moderator_report.strip())),
+    ("3", "Evidence audit", reports_ready),
+    ("4", "Final decision", bool(st.session_state.moderator_report.strip())),
 ]
 step_html = []
 for number, label, done in step_states:
@@ -1385,7 +1573,7 @@ run_full = st.button(
     "Run complete assessment" if not st.session_state.moderator_report else "Run assessment again",
     type="primary",
     disabled=inputs_disabled or not ia_file,
-    help="Extract the PDF, run both independent examiners, then adjudicate the final mark.",
+    help="Extract evidence, mark the IA, audit the evidence, then moderate flagged cases.",
     use_container_width=True,
 )
 st.caption("A complete run makes several model calls and may take a few minutes.")
@@ -1394,14 +1582,14 @@ with st.expander("Advanced · run or repeat one stage"):
     columns = st.columns(3, gap="small")
     with columns[0]:
         run_examiner1 = st.button(
-            "Run Experimentalist",
+            "Run primary mark",
             disabled=inputs_disabled or not ia_file,
             use_container_width=True,
         )
     with columns[1]:
         run_examiner2 = st.button(
-            "Run Data Analyst",
-            disabled=inputs_disabled or not ia_file,
+            "Run evidence audit",
+            disabled=inputs_disabled or not ia_file or not primary_ready,
             use_container_width=True,
         )
     with columns[2]:
@@ -1426,9 +1614,17 @@ if selected_action:
         st.session_state.examiner1_report = ""
         st.session_state.examiner2_report = ""
         st.session_state.moderator_report = ""
+        st.session_state.moderation_reasons = []
+        st.session_state.decision_mode = ""
+        st.session_state.usage_log = []
     elif selected_action in {"examiner1", "examiner2"}:
-        # A changed independent report invalidates any earlier adjudication.
+        # A changed primary mark invalidates the earlier audit and final decision.
         st.session_state.moderator_report = ""
+        st.session_state[f"{selected_action}_report"] = ""
+        st.session_state.moderation_reasons = []
+        st.session_state.decision_mode = ""
+        if selected_action == "examiner1":
+            st.session_state.examiner2_report = ""
     st.session_state.pending_action = selected_action
     if not st.session_state.is_processing:
         st.session_state.is_processing = True
@@ -1464,216 +1660,113 @@ if processing_action:
         st.session_state.is_processing = False
         st.rerun()
 
-    criteria_ready = AIResult(text=st.session_state.criteria_text, used_digest=False)
     ia_ready = AIResult(text=st.session_state.ia_ready_text, used_digest=st.session_state.ia_used_digest)
-    digest_citation_guidance = build_digest_citation_guidance(st.session_state.ia_used_digest)
 
     if processing_action == "full":
         try:
-            with st.status("Running the complete assessment…", expanded=True) as status:
-                status.write("Document prepared and evidence coverage checked.")
-                status.write("Examiner 1 is reviewing experimental design and reproducibility.")
-                examiner1_input = EXAMINER1_PROMPT.format(
-                    rubric_text=criteria_ready.text,
-                    ia_text=ia_ready.text,
-                    coverage_report=st.session_state.ia_coverage_report,
-                    visual_analysis=st.session_state.ia_visual_analysis,
-                    digest_citation_guidance=digest_citation_guidance,
-                )
-                st.session_state.examiner1_report = call_llm(
-                    client,
-                    model=model,
-                    instructions=(
-                        "Act as Examiner 1, the independent Experimentalist. Apply the supplied "
-                        "IB rubric by best fit, verify every material claim against cited IA evidence, "
-                        "and return only the requested Markdown. "
-                        f"{ANTI_INJECTION_INSTRUCTIONS}"
-                    ),
-                    user_input=examiner1_input,
-                )
+            with st.status("Reviewing the IA and checking evidence…", expanded=True) as status:
+                status.write("The primary marker is applying the four rubric criteria.")
+                st.session_state.examiner1_report = run_primary_mark(client, model, ia_ready)
 
-                status.write("Examiner 2 is independently checking data treatment and physics reasoning.")
-                examiner2_input = EXAMINER2_PROMPT.format(
-                    rubric_text=criteria_ready.text,
-                    ia_text=ia_ready.text,
-                    coverage_report=st.session_state.ia_coverage_report,
-                    visual_analysis=st.session_state.ia_visual_analysis,
-                    digest_citation_guidance=digest_citation_guidance,
-                )
-                st.session_state.examiner2_report = call_llm(
-                    client,
-                    model=model,
-                    instructions=(
-                        "Act as Examiner 2, the independent Data & Physics Analyst. Apply the supplied "
-                        "IB rubric by best fit, verify every material claim against cited IA evidence, "
-                        "and return only the requested Markdown. "
-                        f"{ANTI_INJECTION_INSTRUCTIONS}"
-                    ),
-                    user_input=examiner2_input,
-                )
+                status.write("The evidence auditor is checking claims, calculations and citations.")
+                st.session_state.examiner2_report = run_evidence_audit(client, model, ia_ready)
 
-                status.write("The Chief Moderator is verifying both reports and adjudicating the final marks.")
-                moderator_input = MODERATOR_PROMPT.format(
-                    rubric_text=criteria_ready.text,
-                    ia_text=ia_ready.text,
-                    examiner1_report=st.session_state.examiner1_report,
-                    examiner2_report=st.session_state.examiner2_report,
-                    coverage_report=st.session_state.ia_coverage_report,
-                    visual_analysis=st.session_state.ia_visual_analysis,
-                    digest_citation_guidance=digest_citation_guidance,
-                )
-                st.session_state.moderator_report = call_llm(
-                    client,
-                    model=model,
-                    instructions=(
-                        "Act as Chief Moderator. Independently apply the supplied IB rubric, verify "
-                        "examiner claims against IA evidence, adjudicate rather than average, and return "
-                        "only the requested Markdown. "
-                        f"{ANTI_INJECTION_INSTRUCTIONS}"
-                    ),
-                    user_input=moderator_input,
-                )
+                reasons = current_moderation_reasons()
+                st.session_state.moderation_reasons = reasons
+                if reasons:
+                    status.write("A disagreement or evidence gap needs chief moderation.")
+                    st.session_state.moderator_report = run_chief_moderation(
+                        client, model, ia_ready, reasons
+                    )
+                    st.session_state.decision_mode = "moderated"
+                else:
+                    status.write("The audit confirmed all four marks and source checks.")
+                    agreed = build_agreed_decision(
+                        st.session_state.examiner1_report,
+                        st.session_state.examiner2_report,
+                    )
+                    require_valid_report(
+                        agreed, "Agreed decision", ia_ready.used_digest,
+                        st.session_state.debug_info["ia_pages"],
+                    )
+                    st.session_state.moderator_report = agreed
+                    st.session_state.decision_mode = "audited agreement"
                 status.update(label="Assessment complete", state="complete", expanded=False)
-        except LLMError as exc:
-            record_llm_error("complete_assessment", exc)
-            st.session_state.processing_error = exc.user_message
+        except (LLMError, ValueError) as exc:
+            if isinstance(exc, LLMError):
+                record_llm_error("complete_assessment", exc)
+                st.session_state.processing_error = exc.user_message
+            else:
+                st.session_state.processing_error = str(exc)
             st.session_state.pending_action = None
             st.session_state.is_processing = False
             st.rerun()
         else:
-            reports = (
-                st.session_state.examiner1_report,
-                st.session_state.examiner2_report,
-                st.session_state.moderator_report,
-            )
-            if not all(
-                report_has_expected_citations(report, ia_ready.used_digest) for report in reports
-            ):
-                st.session_state.debug_info["citation_warning"] = (
-                    "At least one report may be missing expected page or digest citations."
-                )
             st.session_state.pending_action = None
             st.session_state.is_processing = False
             st.rerun()
 
     if processing_action == "examiner1":
-        with st.spinner("Generating Examiner 1 report..."):
-            examiner_input = EXAMINER1_PROMPT.format(
-                rubric_text=criteria_ready.text,
-                ia_text=ia_ready.text,
-                coverage_report=st.session_state.ia_coverage_report,
-                visual_analysis=st.session_state.ia_visual_analysis,
-                digest_citation_guidance=digest_citation_guidance,
-            )
+        with st.spinner("Generating primary mark..."):
             try:
-                examiner_report = call_llm(
-                    client,
-                    model=model,
-                    instructions=(
-                        "Act as Examiner 1, the independent Experimentalist. Apply the supplied "
-                        "IB rubric by best fit, verify material claims against cited IA evidence, "
-                        "and return only the requested Markdown. "
-                        f"{ANTI_INJECTION_INSTRUCTIONS}"
-                    ),
-                    user_input=examiner_input,
-                )
+                st.session_state.examiner1_report = run_primary_mark(client, model, ia_ready)
             except LLMError as exc:
-                record_llm_error("examiner1_report", exc)
+                record_llm_error("primary_mark", exc)
                 st.session_state.processing_error = exc.user_message
-                st.session_state.pending_action = None
-                st.session_state.is_processing = False
-                st.rerun()
             else:
-                st.session_state.examiner1_report = examiner_report
-                if not report_has_expected_citations(examiner_report, ia_ready.used_digest):
-                    st.warning(
-                        "Examiner 1 report may be missing expected citation markers. "
-                        "Check that evidence references include page or digest range labels."
-                    )
-                st.session_state.pending_action = None
-                st.session_state.is_processing = False
-                st.success("Examiner 1 report generated.")
-                st.rerun()
+                st.success("Primary mark generated. Run the evidence audit next.")
+            st.session_state.pending_action = None
+            st.session_state.is_processing = False
+            st.rerun()
 
     if processing_action == "examiner2":
-        with st.spinner("Generating Examiner 2 report..."):
-            examiner_input = EXAMINER2_PROMPT.format(
-                rubric_text=criteria_ready.text,
-                ia_text=ia_ready.text,
-                coverage_report=st.session_state.ia_coverage_report,
-                visual_analysis=st.session_state.ia_visual_analysis,
-                digest_citation_guidance=digest_citation_guidance,
-            )
+        with st.spinner("Auditing the evidence..."):
             try:
-                examiner_report = call_llm(
-                    client,
-                    model=model,
-                    instructions=(
-                        "Act as Examiner 2, the independent Data & Physics Analyst. Apply the supplied "
-                        "IB rubric by best fit, verify material claims against cited IA evidence, "
-                        "and return only the requested Markdown. "
-                        f"{ANTI_INJECTION_INSTRUCTIONS}"
-                    ),
-                    user_input=examiner_input,
-                )
-            except LLMError as exc:
-                record_llm_error("examiner2_report", exc)
-                st.session_state.processing_error = exc.user_message
-                st.session_state.pending_action = None
-                st.session_state.is_processing = False
-                st.rerun()
-            else:
-                st.session_state.examiner2_report = examiner_report
-                if not report_has_expected_citations(examiner_report, ia_ready.used_digest):
-                    st.warning(
-                        "Examiner 2 report may be missing expected citation markers. "
-                        "Check that evidence references include page or digest range labels."
+                st.session_state.examiner2_report = run_evidence_audit(client, model, ia_ready)
+                st.session_state.moderation_reasons = current_moderation_reasons()
+                if not st.session_state.moderation_reasons:
+                    agreed = build_agreed_decision(
+                        st.session_state.examiner1_report,
+                        st.session_state.examiner2_report,
                     )
-                st.session_state.pending_action = None
-                st.session_state.is_processing = False
-                st.success("Examiner 2 report generated.")
-                st.rerun()
+                    require_valid_report(
+                        agreed, "Agreed decision", ia_ready.used_digest,
+                        st.session_state.debug_info["ia_pages"],
+                    )
+                    st.session_state.moderator_report = agreed
+                    st.session_state.decision_mode = "audited agreement"
+            except (LLMError, ValueError) as exc:
+                if isinstance(exc, LLMError):
+                    record_llm_error("evidence_audit", exc)
+                    st.session_state.processing_error = exc.user_message
+                else:
+                    st.session_state.processing_error = str(exc)
+            else:
+                if st.session_state.moderation_reasons:
+                    st.info("The audit found an issue. Run Chief Moderator to adjudicate.")
+                else:
+                    st.success("Evidence audit complete; the marks were confirmed.")
+            st.session_state.pending_action = None
+            st.session_state.is_processing = False
+            st.rerun()
 
     if processing_action == "moderator":
-        with st.spinner("Generating Moderator report..."):
-            moderator_input = MODERATOR_PROMPT.format(
-                rubric_text=criteria_ready.text,
-                ia_text=ia_ready.text,
-                examiner1_report=st.session_state.examiner1_report,
-                examiner2_report=st.session_state.examiner2_report,
-                coverage_report=st.session_state.ia_coverage_report,
-                visual_analysis=st.session_state.ia_visual_analysis,
-                digest_citation_guidance=digest_citation_guidance,
-            )
+        with st.spinner("Adjudicating the flagged issues..."):
             try:
-                moderator_report = call_llm(
-                    client,
-                    model=model,
-                    instructions=(
-                        "Act as Chief Moderator. Independently apply the supplied IB rubric, verify "
-                        "examiner claims against IA evidence, adjudicate rather than average, and return "
-                        "only the requested Markdown. "
-                        f"{ANTI_INJECTION_INSTRUCTIONS}"
-                    ),
-                    user_input=moderator_input,
+                reasons = current_moderation_reasons()
+                st.session_state.moderation_reasons = reasons
+                st.session_state.moderator_report = run_chief_moderation(
+                    client, model, ia_ready, reasons
                 )
+                st.session_state.decision_mode = "moderated"
             except LLMError as exc:
-                record_llm_error("moderator_report", exc)
+                record_llm_error("chief_moderation", exc)
                 st.session_state.processing_error = exc.user_message
-                st.session_state.pending_action = None
-                st.session_state.is_processing = False
-                st.rerun()
             else:
-                st.session_state.moderator_report = moderator_report
-                if not report_has_expected_citations(moderator_report, ia_ready.used_digest):
-                    st.warning(
-                        "Moderator report may be missing expected citation markers. "
-                        "Check that evidence references include page or digest range labels."
-                    )
-                st.session_state.pending_action = None
-                st.session_state.is_processing = False
-                st.success("Moderator report generated.")
-                st.rerun()
+                st.success("Chief Moderator decision generated.")
+            st.session_state.pending_action = None
+            st.session_state.is_processing = False
+            st.rerun()
 
 # -------------------------
 # Results, reports and evidence coverage
@@ -1694,10 +1787,13 @@ if has_any_report:
         or st.session_state.examiner2_report
     )
     score_map = extract_report_scores(decision_report)
-    if score_map:
+    if len(score_map) == 4:
         total = sum(score_map.values())
         metric_columns = st.columns(5, gap="small")
-        metric_columns[0].metric("Total", f"{total}/24")
+        metric_columns[0].metric(
+            "Final total" if st.session_state.moderator_report else "Proposed total",
+            f"{total}/24",
+        )
         short_labels = {
             "Research design": "Research design",
             "Data analysis": "Data analysis",
@@ -1707,18 +1803,26 @@ if has_any_report:
         for column, criterion in zip(metric_columns[1:], short_labels):
             value = score_map.get(criterion)
             column.metric(short_labels[criterion], f"{value}/6" if value is not None else "—")
+    else:
+        st.warning("The report does not contain all four criterion marks. The total is hidden until the report is complete.")
 
     if st.session_state.moderator_report:
-        st.success("Final decision ready · both independent reviews have been adjudicated.")
+        if st.session_state.decision_mode == "moderated":
+            st.success("Final decision ready · the flagged issues were reviewed by the Chief Moderator.")
+        else:
+            st.success("Final decision ready · the evidence audit confirmed all four marks.")
+        st.caption("Review the cited pages in the original IA before using this mark.")
     else:
-        st.info("Independent review in progress · run both examiners before the Chief Moderator.")
+        st.info("Review in progress · complete the evidence audit before using the marks.")
+    if st.session_state.moderation_reasons:
+        st.warning("Moderator review needed: " + "; ".join(st.session_state.moderation_reasons))
 
     combined_report = build_combined_report(
         st.session_state.examiner1_report,
         st.session_state.examiner2_report,
         st.session_state.moderator_report,
     )
-    download_columns = st.columns([1, 1, 2])
+    download_columns = st.columns([1, 1, 1])
     with download_columns[0]:
         st.download_button(
             "Download complete bundle",
@@ -1737,17 +1841,30 @@ if has_any_report:
             disabled=inputs_disabled or not st.session_state.moderator_report,
             use_container_width=True,
         )
+    with download_columns[2]:
+        if ia_file:
+            st.download_button(
+                "Download original IA",
+                data=ia_file.getvalue(),
+                file_name=ia_file.name,
+                mime="application/pdf",
+                disabled=inputs_disabled,
+                use_container_width=True,
+            )
 
     final_tab, examiner1_tab, examiner2_tab, evidence_tab = st.tabs(
-        ["Final decision", "Experimentalist", "Data analyst", "Evidence coverage"]
+        ["Final decision", "Primary mark", "Evidence audit", "Source evidence"]
     )
     with final_tab:
-        st.markdown(st.session_state.moderator_report or "_Run the Chief Moderator to create the final decision._")
+        st.markdown(st.session_state.moderator_report or "_Complete the evidence audit and any needed moderation to create a final decision._")
     with examiner1_tab:
-        st.markdown(st.session_state.examiner1_report or "_This independent review has not run yet._")
+        st.markdown(st.session_state.examiner1_report or "_The primary mark has not run yet._")
     with examiner2_tab:
-        st.markdown(st.session_state.examiner2_report or "_This independent review has not run yet._")
+        st.markdown(st.session_state.examiner2_report or "_The evidence audit has not run yet._")
     with evidence_tab:
+        visual_error = st.session_state.debug_info.get("visual_analysis", {}).get("error")
+        if visual_error:
+            st.warning("Some visuals could not be analysed. Check the original PDF before relying on the mark.")
         if not st.session_state.ia_page_diagnostics:
             st.info("Evidence coverage appears after document preparation.")
         else:
@@ -1760,6 +1877,15 @@ if has_any_report:
             else:
                 st.success("No material extraction warnings were detected.")
             st.code(st.session_state.ia_coverage_report, language=None)
+            st.code(st.session_state.ia_evidence_index, language=None)
+            with st.expander("Page-linked candidate evidence"):
+                st.caption("Exact excerpts for navigation; check each claim against the full PDF page.")
+                st.code(st.session_state.ia_evidence_ledger, language=None)
+            st.caption(
+                f"{len(st.session_state.ia_source_images)} original visuals were supplied directly "
+                f"to the marker and auditor from {len(st.session_state.ia_extracted_visuals)} detected visuals. "
+                "Check the original PDF for anything outside this selection."
+            )
             with st.expander("Page-by-page extraction details"):
                 st.dataframe(
                     format_page_diagnostics(st.session_state.ia_page_diagnostics),
@@ -1769,10 +1895,37 @@ if has_any_report:
             if st.session_state.ia_visual_analysis:
                 with st.expander("Graph, table and diagram analysis"):
                     st.code(st.session_state.ia_visual_analysis, language=None)
+            if st.session_state.ia_source_images:
+                with st.expander("Original visuals supplied to the marker"):
+                    for source_image in st.session_state.ia_source_images:
+                        st.image(
+                            source_image.png_data,
+                            caption=f"Page {source_image.page_number} · {source_image.name}",
+                            use_container_width=True,
+                        )
 
     with st.expander("Technical details"):
         st.caption("Useful for troubleshooting extraction or model-call issues.")
         st.json(st.session_state.debug_info)
+        if st.session_state.moderator_report and ia_file:
+            evaluation_record = build_evaluation_record(
+                case_id=hashlib.sha256(ia_file.getvalue()).hexdigest()[:16],
+                model=model,
+                primary_report=st.session_state.examiner1_report,
+                audit_report=st.session_state.examiner2_report,
+                final_report=st.session_state.moderator_report,
+                decision_mode=st.session_state.decision_mode,
+                escalation_reasons=st.session_state.moderation_reasons,
+                usage_log=st.session_state.usage_log,
+            )
+            st.download_button(
+                "Download scoring record",
+                data=json.dumps(evaluation_record, indent=2),
+                file_name="physics_ia_scoring_record.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+            st.caption("Contains marks and run statistics, without the student PDF or report text.")
 elif st.session_state.ia_page_diagnostics:
     st.markdown("---")
     st.markdown("### Evidence coverage")

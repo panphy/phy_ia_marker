@@ -1,12 +1,23 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from app_utils import (
+    LoginThrottle,
     PROMPT_QA_MARKER,
     apply_prompt_qa,
+    audit_requests_review,
+    build_agreed_decision,
+    build_candidate_evidence_ledger,
     build_combined_report,
+    build_evaluation_record,
+    build_model_input,
+    build_page_evidence_index,
     chunk_pages,
     extract_report_scores,
+    moderation_reasons,
     report_has_expected_citations,
+    report_page_issues,
+    report_validation_issues,
 )
 
 
@@ -18,8 +29,33 @@ def read_prompt(filename: str) -> str:
 
 
 def test_report_has_expected_citations_accepts_page_markers_with_digest() -> None:
-    report = "Evidence cited at --- Page 3 --- for the measurement table."
+    report = "\n".join(
+        f"### {criterion} — 4/6\n- Verified evidence: Page 3."
+        for criterion in ("Research design", "Data analysis", "Conclusion", "Evaluation")
+    )
     assert report_has_expected_citations(report, used_digest=True)
+
+
+def test_report_validation_rejects_empty_partial_and_singly_cited_reports() -> None:
+    assert report_validation_issues("", used_digest=False)
+    partial = "### Research design — 5/6\n- Evidence: Page 1."
+    assert "Missing criterion marks" in report_validation_issues(partial, False)[0]
+    singly_cited = "\n".join(
+        f"### {criterion} — 4/6\n- Evidence: {'Page 1.' if index == 0 else 'Uncited.'}"
+        for index, criterion in enumerate(
+            ("Research design", "Data analysis", "Conclusion", "Evaluation")
+        )
+    )
+    assert not report_has_expected_citations(singly_cited, used_digest=False)
+
+
+def test_login_throttle_is_shared_across_attempts_and_expires() -> None:
+    throttle = LoginThrottle(max_attempts=2, window_seconds=300)
+    assert throttle.try_password("bad", "secret", now=0) == (False, 0)
+    assert throttle.try_password("bad", "secret", now=1) == (False, 300)
+    assert throttle.try_password("secret", "secret", now=2)[0] is False
+    assert throttle.cooldown_remaining(now=2) > 0
+    assert throttle.try_password("secret", "secret", now=302) == (True, 0)
 
 
 def test_chunk_pages_reinserts_header_for_oversized_pages() -> None:
@@ -47,44 +83,45 @@ def test_apply_prompt_qa_skips_when_marker_present() -> None:
     assert updated == prompt
 
 
-def test_examiner_prompts_keep_distinct_personas() -> None:
+def test_primary_and_auditor_prompts_have_distinct_jobs() -> None:
     examiner1 = read_prompt("examiner1_prompt.md")
     examiner2 = read_prompt("examiner2_prompt.md")
 
     assert "Examiner 1 — the Experimentalist" in examiner1
-    assert "Examiner 2 — the Data & Physics Analyst" in examiner2
-    assert "Data & Physics Analyst" not in examiner1
-    assert "the Experimentalist" not in examiner2
+    assert "Evidence Auditor" in examiner2
+    assert "primary marker's evidence" in examiner2
     assert "This lens must not override the rubric" in examiner1
-    assert "This lens must not override the rubric" in examiner2
     assert "Do not use invented universal thresholds" in examiner1
-    assert "Do not use invented universal thresholds" in examiner2
+    assert "Escalation required" in examiner2
 
 
 def test_moderator_prompt_adjudicates_without_averaging() -> None:
     moderator = read_prompt("moderator_prompt.md")
 
-    assert "adjudicator, not an averager" in moderator
-    assert "Do not average examiner marks" in moderator
-    assert "independent provisional mark" in moderator
-    assert "If both examiners agree but their evidence is unsupported, override them." in moderator
-    assert "examiner marks differ by 3 or more" in moderator
+    assert "do not average marks" in moderator
+    assert "Reasons this case was escalated" in moderator
+    assert "Verify them against the IA" in moderator
 
 
 def test_prompt_templates_format_with_runtime_inputs() -> None:
     common = {
         "rubric_text": "Rubric",
         "ia_text": "--- Page 1 ---\nIA",
+        "evidence_index": "Page 1: selectable text",
+        "evidence_ledger": "Page 1: candidate",
         "coverage_report": "Coverage",
         "visual_analysis": "Visuals",
         "digest_citation_guidance": "",
     }
     assert "Rubric" in read_prompt("examiner1_prompt.md").format(**common)
-    assert "Rubric" in read_prompt("examiner2_prompt.md").format(**common)
+    assert "Rubric" in read_prompt("examiner2_prompt.md").format(
+        **common, primary_report="Primary mark"
+    )
     assert "Examiner one" in read_prompt("moderator_prompt.md").format(
         **common,
         examiner1_report="Examiner one",
         examiner2_report="Examiner two",
+        escalation_reasons="Disputed Data analysis mark",
     )
 
 
@@ -120,9 +157,106 @@ def test_extract_report_scores_uses_final_column_in_moderator_table() -> None:
     }
 
 
+def test_report_validation_flags_conflicting_heading_and_table_marks() -> None:
+    report = "\n".join(
+        f"### {criterion} — 4/6\n- Verified evidence: Page 1."
+        for criterion in ("Research design", "Data analysis", "Conclusion", "Evaluation")
+    )
+    report += "\n| Research design | 4 | 5 | 5 | 6 | Page 1 |"
+
+    assert "Research design heading and final table mark disagree." in report_validation_issues(
+        report, used_digest=False
+    )
+
+
 def test_build_combined_report_omits_empty_sections() -> None:
     bundle = build_combined_report("Examiner one", "", "Final decision")
 
-    assert "Examiner 1 — Experimentalist" in bundle
-    assert "Examiner 2 — Data & Physics Analyst" not in bundle
-    assert "Chief Moderator — Final decision" in bundle
+    assert "Primary mark — Experimentalist" in bundle
+    assert "Evidence audit" not in bundle
+    assert "Final decision" in bundle
+
+
+def _complete_report(mark: int, audit_verdict: str | None = None) -> str:
+    prefix = (
+        f"## Evidence audit\n- **Escalation required:** {audit_verdict}\n"
+        if audit_verdict else "## Primary mark\n- **Human review recommended:** no\n"
+    )
+    sections = "\n".join(
+        f"### {criterion} — {mark}/6\n- **Verified evidence:** Page 1 supports the decision."
+        for criterion in ("Research design", "Data analysis", "Conclusion", "Evaluation")
+    )
+    return prefix + sections
+
+
+def test_moderation_is_triggered_by_disagreement_and_evidence_gaps() -> None:
+    primary = _complete_report(4)
+    audit = _complete_report(4, "no")
+    assert moderation_reasons(primary, audit, [], False, False) == []
+    assert moderation_reasons(primary, _complete_report(5, "yes"), [], False, False)
+    assert moderation_reasons(primary, audit, ["Page 2 unreadable"], False, False)
+    assert moderation_reasons(primary, audit, [], False, True)
+    assert audit_requests_review(_complete_report(4, "yes"))
+    assert moderation_reasons(primary.replace("recommended:** no", "recommended:** yes"), audit, [], False, False)
+
+
+def test_agreed_decision_keeps_primary_evidence_and_total() -> None:
+    decision = build_agreed_decision(_complete_report(4), _complete_report(4, "no"))
+    assert "**Total:** 16/24" in decision
+    assert not report_validation_issues(decision, False)
+
+
+def test_report_page_references_are_checked_against_pdf() -> None:
+    assert report_page_issues("Evidence: Page 9", page_count=3)
+    assert not report_page_issues("Evidence: Pages 1–3", page_count=3)
+
+
+def test_page_evidence_index_is_source_linked_without_claims() -> None:
+    class Item:
+        def __init__(self, page_number: int, has_text: bool = True, used_ocr: bool = False):
+            self.page_number = page_number
+            self.has_text = has_text
+            self.used_ocr = used_ocr
+
+    index = build_page_evidence_index([Item(1)], [Item(1)], [Item(1)])
+    assert "Page 1: selectable text; 1 detected visuals" in index
+    assert "at least one source image from page supplied: yes" in index
+
+
+def test_candidate_evidence_ledger_quotes_exact_page_text() -> None:
+    text = "--- Page 2 ---\nThe research question compares spring length and force.\nThe graph has error bars."
+    ledger = build_candidate_evidence_ledger(text)
+
+    assert "Page 2: The research question compares spring length and force." in ledger
+    assert "Page 2: The graph has error bars." in ledger
+    assert "untrusted" in ledger
+
+
+def test_evaluation_export_omits_student_and_report_text() -> None:
+    primary = _complete_report(4)
+    audit = _complete_report(4, "no")
+    final = build_agreed_decision(primary, audit)
+    record = build_evaluation_record(
+        "case-hash", "gpt-6-sol", primary, audit, final, "audited agreement", [],
+        [{"input_tokens": 100, "output_tokens": 20, "seconds": 2.5}],
+    )
+
+    assert record["marks"]["Conclusion"] == 4
+    assert record["api_input_tokens"] == 100
+    assert "report" not in record
+    assert "student" not in str(record).lower()
+
+
+def test_model_input_keeps_page_labels_with_source_images() -> None:
+    assert build_model_input("Mark this IA", []) == "Mark this IA"
+
+    payload = build_model_input(
+        "Mark this IA", [SimpleNamespace(page_number=2, png_data=b"PNG")]
+    )
+    assert payload[0]["role"] == "user"
+    content = payload[0]["content"]
+    assert content[0] == {"type": "input_text", "text": "Mark this IA"}
+    assert content[1] == {"type": "input_text", "text": "Original PDF visual from Page 2."}
+    assert content[2]["type"] == "input_image"
+    assert content[2]["image_url"] == "data:image/png;base64,UE5H"
+    assert content[2]["detail"] == "high"

@@ -1,14 +1,14 @@
 # IB DP Physics IA Marker
 
-Modern Streamlit workspace for reviewing IB DP Physics scientific investigations (first assessment 2025 onward) against the current official rubric. It extracts evidence from a student PDF, checks coverage, runs two independent specialist examiners, and asks a chief moderator to adjudicate the final mark.
+Modern Streamlit workspace for reviewing IB DP Physics scientific investigations (first assessment 2025 onward) against the current official rubric. It extracts page-linked evidence from a student PDF, proposes a mark, audits the evidence behind it, and moderates disputed or uncertain cases.
 
 ## Features
 - **Rubric-driven marking** for Research design, Data analysis, Conclusion, and Evaluation.
-- **Two genuinely distinct examiners**: an Experimentalist and a Data & Physics Analyst.
-- **Chief-moderator adjudication** based on an independent provisional mark—not an average.
+- **Evidence audit** checks the primary mark's claims, calculations, citations and rubric fit.
+- **Targeted moderation** for mark disagreements, audit concerns and source-coverage gaps; marks are never averaged.
 - **PDF text extraction + OCR fallback** for scanned documents, with per-page diagnostics.
 - **Digest mode** for large IAs to fit within model context limits (auto-triggers over a size threshold).
-- **Visual extraction + vision summaries** for raster images and vector graphics.
+- **Original PDF visuals supplied directly to marking calls**, with source-page labels and a reviewable preview.
 - **Coverage reporting** that flags missing text, OCR confidence, and unresolved figure/table labels.
 - **One-click complete assessment**, stage-by-stage reruns, score cards and downloadable Markdown reports.
 - **Password gate + cooldown** to reduce unauthorized access attempts.
@@ -18,7 +18,8 @@ Modern Streamlit workspace for reviewing IB DP Physics scientific investigations
 - `app_utils.py` — prompt QA helpers, page chunking, and citation validation.
 - `pdf_utils.py` — PDF parsing, OCR, and visual extraction helpers.
 - `criteria/ib_phy_ia_criteria.md` — rubric content used in prompts.
-- `prompts/` — prompt templates for the two examiners and moderator.
+- `prompts/` — prompt templates for the primary marker, evidence auditor and moderator.
+- `eval_marking.py` — compare exported scoring records with qualified human marks.
 - `tests/` — unit tests for prompt QA and PDF extraction utilities.
 - `tasks.md` — roadmap and follow-up tasks.
 
@@ -27,43 +28,47 @@ Modern Streamlit workspace for reviewing IB DP Physics scientific investigations
 2. Enter the app password.
 3. Upload a student IA PDF.
 4. Select **Run complete assessment**.
-5. Review the final decision, both independent reports and evidence coverage.
+5. Review the final decision, evidence audit and original source visuals.
 6. Download the final decision or the complete Markdown bundle.
 
 ## Configuration notes
-- **Models**: marking uses `gpt-5.6-sol`; visual extraction uses `gpt-5.6-terra`.
+- **Models**: marking and visual analysis use `gpt-6-sol` through the Responses API.
 - **Reasoning**: marking and adjudication use high reasoning effort; evidence-preserving digest work uses low effort.
 - **OCR**: toggle in the sidebar; set OCR language via the text input.
 - **Digesting**: large PDFs are summarized into a structured digest before marking. The digest
   preserves key evidence (numbers, units, uncertainties, figures/tables) and keeps page-range
   labels so citations can still reference where evidence came from.
-- **Visual analysis**: vector graphics are rasterized per page and summarized by a vision-capable model.
+- **Visual analysis**: vector graphics are rasterized per page. Optional extra vision summaries are off by default; selected original visuals still go directly to marking calls.
 - **Storage**: `STORE_RESPONSES` is `False` by default for privacy.
-- **Password throttle**: the app blocks repeated failed password attempts for 5 minutes.
+- **Password throttle**: the app shares a 5-minute cooldown across browser sessions in one server process after five failed attempts. Deployments with multiple worker processes need an external shared rate limiter.
 - **Encrypted PDFs**: supply a PDF password in the sidebar if needed.
 
 ## How marking works
-1. The PDF is parsed page-by-page. If a page has no selectable text, OCR is attempted (if enabled).
+1. The PDF is parsed page-by-page. OCR is attempted on pages with no selectable text and on image-heavy pages with only a short selectable header (if enabled).
 2. If the IA is too large, it is automatically summarized into a structured digest to fit the model
    context. The digest keeps page-range labels so evidence can still be cited.
-3. The Experimentalist reviews experimental design, reproducibility and evaluation quality.
-4. The Data & Physics Analyst independently reviews processing, uncertainty and physical reasoning.
-5. The Chief Moderator forms an independent provisional mark, verifies both reports against the IA, and adjudicates the final result without averaging.
+3. The app builds a page index and exact candidate excerpts for rubric areas; these are navigation aids, not verified claims. A primary marker applies all four criteria and cites original pages.
+4. An evidence auditor checks the primary claims against the IA and attached original visuals.
+5. Exact agreement with no evidence warning is finalized after audit. A mark difference, audit concern or coverage gap goes to the Chief Moderator.
 
 ## Rubric currency
 The bundled rubric is sourced from the *Physics guide* (February 2023, updated November 2024), first assessment 2025. The IB's 2026 Physics examiner instructions continue to use the same four criteria and 24-mark structure. Current-session application notes are recorded in `criteria/ib_phy_ia_criteria.md`.
 
 ## How visuals are read and used
 1. **Visual extraction**: embedded raster images are extracted from the PDF. Vector graphics are detected and rasterized per page for vision analysis when possible.  
-2. **Caption linking**: figure/table captions are inferred from IA text lines that start with `Figure`, `Fig.`, or `Table`, and attached to visuals on the same page when possible.
-3. **Vision analysis**: extracted raster visuals are summarized by a vision-capable model using a strict, five-line schema (type, summary, chart details, table structure, readability issues).
+2. **Caption linking**: figure/table captions are inferred from IA text lines that start with `Figure`, `Fig.`, or `Table`. A caption is attached only when its page has one caption and one visual.
+3. **Optional vision summaries**: when enabled, selected visuals are summarized by a vision-capable model using a strict, five-line schema (type, summary, chart details, table structure, readability issues). This option is off by default because the marking calls receive selected source images directly.
 4. **Coverage reporting**: the app produces a content coverage report that flags missing text, OCR usage/quality, and unresolved figure/table labels.
-5. **Marking safeguards**: prompts require that **only IA text or the coverage report can be cited as evidence**. Visual analysis is treated as **uncited hints** and must remain separate from evidence-backed claims.
+5. **Marking safeguards**: the IA text and directly attached original PDF visuals can support Page N citations. Extraction reports are diagnostics; separate vision summaries remain uncited hints. Citations to pages outside the PDF are rejected.
 
 **Reliability notes**
 - Vector graphics are rasterized per page; low-resolution source PDFs can still limit chart/table readability.
 - OCR confidence warnings and “no-text” page flags are intended to prevent over-reliance on unreadable content.
-- For planned upgrades (visual prioritization and cross-checking visual hints against IA text), see `tasks.md`.
+- Source-image selection is capped at six images per assessment. The auditor is instructed to request escalation if a necessary visual was not supplied or is unreadable.
+
+## Calibration against human marks
+
+The **Technical details** panel can download a scoring record containing marks, route, model usage and a PDF-derived case ID, without the student's PDF or report text. Add `human_marks` for each of the four criteria and optionally `human_review_required` (a Boolean) to each record. Save one JSON object per line in a JSONL file, then run `python eval_marking.py records.jsonl`. Keep the human marks blind to the app's result where possible. The comparison reports criterion and total mark error, within-one-mark rates, human-review recall and average API usage. Use the same IAs to compare this workflow with any previous or alternative pipeline; no quality claim should be inferred until such a set is evaluated.
 
 ## Troubleshooting
 - **No extractable text**: enable OCR or verify your PDF isn’t image-only.

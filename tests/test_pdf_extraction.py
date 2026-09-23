@@ -7,9 +7,12 @@ from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DictionaryObject, NameObject, StreamObject
 
 from pdf_utils import (
+    ExtractedVisual,
     PdfExtractionError,
     PdfPasswordRequiredError,
+    attach_unambiguous_captions,
     ocr_pdf_page,
+    prepare_source_images,
     render_pdf_page_image,
     extract_pdf_text,
 )
@@ -111,6 +114,58 @@ def test_extract_pdf_text_handles_mixed_content_pdf() -> None:
     assert diagnostics[1].has_text is False
     assert diagnostics[1].image_count >= 1
     assert any(visual.page_number == 2 for visual in visuals)
+
+
+def test_short_text_with_image_receives_ocr_supplement(monkeypatch: pytest.MonkeyPatch) -> None:
+    writer = PdfWriter()
+    add_text_page(writer, "Page 1")
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    image = ExtractedVisual(1, "scan", "png", 10, 10, b"image")
+    monkeypatch.setattr("pdf_utils.extract_page_images", lambda page, page_number: [image])
+    monkeypatch.setattr(
+        "pdf_utils.ocr_pdf_page",
+        lambda *args, **kwargs: ("A long scanned body with measurements and uncertainties.", 92.0),
+    )
+
+    text, _, ocr_pages, diagnostics, _ = extract_pdf_text(
+        buffer.getvalue(), use_ocr=True, ocr_language="eng"
+    )
+
+    assert "Page 1\n[OCR supplement]" in text
+    assert "measurements and uncertainties" in text
+    assert ocr_pages == 1
+    assert diagnostics[0].has_text and diagnostics[0].used_ocr
+
+
+def test_captions_are_only_linked_when_match_is_unambiguous() -> None:
+    first = ExtractedVisual(1, "a", "png", 10, 10, b"a")
+    second = ExtractedVisual(1, "b", "png", 10, 10, b"b")
+
+    assert attach_unambiguous_captions([first, second], {1: ["Figure 1: graph"]}) == [first, second]
+    assert attach_unambiguous_captions([first], {1: ["Figure 1: graph"]})[0].captions == (
+        "Figure 1: graph",
+    )
+
+
+def test_prepare_source_images_normalizes_and_deduplicates_vector_page() -> None:
+    image = Image.new("RGB", (10, 10), color="blue")
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    vector = ExtractedVisual(
+        2, "vector-a", "pdf-vector", 10, 10, b"vector", kind="vector",
+        rasterized_data=buffer.getvalue(), rasterized_format="png",
+    )
+    duplicate = ExtractedVisual(
+        2, "vector-b", "pdf-vector", 10, 10, b"vector", kind="vector",
+        rasterized_data=buffer.getvalue(), rasterized_format="png",
+    )
+
+    prepared = prepare_source_images([vector, duplicate])
+
+    assert len(prepared) == 1
+    assert prepared[0].page_number == 2
+    assert prepared[0].png_data.startswith(b"\x89PNG")
 
 
 def test_ocr_pdf_page_passes_pdf_password_to_renderer(monkeypatch: pytest.MonkeyPatch) -> None:

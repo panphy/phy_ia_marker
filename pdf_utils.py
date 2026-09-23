@@ -3,6 +3,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import Tuple
 
+from PIL import Image
 from pdf2image import convert_from_bytes
 from pdf2image.exceptions import PDFInfoNotInstalledError, PDFPageCountError, PDFSyntaxError
 from pypdf import PdfReader
@@ -34,6 +35,37 @@ class ExtractedVisual:
     kind: str = "image"
     rasterized_data: bytes | None = None
     rasterized_format: str | None = None
+
+
+@dataclass(frozen=True)
+class SourceImage:
+    page_number: int
+    name: str
+    png_data: bytes
+    captions: tuple[str, ...] = ()
+
+
+def prepare_source_images(visuals: list[ExtractedVisual]) -> list[SourceImage]:
+    """Normalize selected PDF visuals for direct inspection by marking models."""
+    prepared: list[SourceImage] = []
+    rendered_vector_pages: set[int] = set()
+    for visual in visuals:
+        if visual.kind == "vector" and visual.page_number in rendered_vector_pages:
+            continue
+        source_data = visual.rasterized_data if visual.kind == "vector" else visual.data
+        if not source_data:
+            continue
+        try:
+            with Image.open(io.BytesIO(source_data)) as image:
+                image.thumbnail((2000, 2000))
+                output = io.BytesIO()
+                image.convert("RGB").save(output, format="PNG")
+        except (OSError, ValueError):
+            continue
+        prepared.append(SourceImage(visual.page_number, visual.name, output.getvalue(), visual.captions))
+        if visual.kind == "vector":
+            rendered_vector_pages.add(visual.page_number)
+    return prepared
 
 
 @dataclass
@@ -164,6 +196,23 @@ def extract_page_images(page: object, page_number: int) -> list[ExtractedVisual]
             )
         )
     return extracted
+
+
+def attach_unambiguous_captions(
+    visuals: list[ExtractedVisual], captions_by_page: dict[int, list[str]]
+) -> list[ExtractedVisual]:
+    """Link a caption only when there is exactly one visual and one caption on its page."""
+    visual_counts: dict[int, int] = {}
+    for visual in visuals:
+        visual_counts[visual.page_number] = visual_counts.get(visual.page_number, 0) + 1
+    linked = []
+    for visual in visuals:
+        captions = captions_by_page.get(visual.page_number, [])
+        if visual_counts[visual.page_number] == 1 and len(captions) == 1:
+            linked.append(replace(visual, captions=(captions[0],)))
+        else:
+            linked.append(visual)
+    return linked
 
 
 def _collect_content_streams(page: object) -> list[bytes]:
@@ -353,60 +402,39 @@ def extract_pdf_text(
         except Exception:
             t = ""
         t = re.sub(r"[ \t]+", " ", t).strip()
-        if t:
-            chunks.append(f"\n\n--- Page {i} ---\n{t}")
-            diagnostics.append(
-                PageExtractionDiagnostic(
-                    page_number=i,
-                    has_text=True,
-                    used_ocr=False,
-                    ocr_confidence=None,
-                    image_count=image_count,
-                    vector_count=vector_count,
-                    text_length=len(t),
-                )
+        # A selectable page number or header can sit on top of an otherwise scanned page.
+        # OCR short text pages with visual content instead of treating them as complete.
+        needs_ocr = use_ocr and (not t or (len(t) < 80 and (page_images or page_vectors)))
+        ocr_text = ""
+        ocr_confidence = None
+        if needs_ocr:
+            ocr_text, ocr_confidence = ocr_pdf_page(
+                file_bytes,
+                page_number=i,
+                language=ocr_language,
+                pdf_password=pdf_password,
             )
+        use_ocr_text = bool(ocr_text) and (not t or len(ocr_text) > len(t) + 20)
+        if use_ocr_text:
+            ocr_pages += 1
+        if t:
+            page_text = t
+            if use_ocr_text:
+                page_text += f"\n[OCR supplement]\n{ocr_text}"
+        elif use_ocr_text:
+            page_text = f"[OCR]\n{ocr_text}"
         else:
-            ocr_text = ""
-            ocr_confidence = None
-            if use_ocr:
-                try:
-                    ocr_text, ocr_confidence = ocr_pdf_page(
-                        file_bytes,
-                        page_number=i,
-                        language=ocr_language,
-                        pdf_password=pdf_password,
-                    )
-                except PdfExtractionError:
-                    raise
-            if ocr_text:
-                ocr_pages += 1
-                chunks.append(f"\n\n--- Page {i} ---\n[OCR]\n{ocr_text}")
-                diagnostics.append(
-                    PageExtractionDiagnostic(
-                        page_number=i,
-                        has_text=False,
-                        used_ocr=True,
-                        ocr_confidence=ocr_confidence,
-                        image_count=image_count,
-                        vector_count=vector_count,
-                        text_length=len(ocr_text),
-                    )
-                )
-            else:
-                chunks.append(
-                    f"\n\n--- Page {i} ---\n"
-                    "[No extractable text found on this page]"
-                )
-                diagnostics.append(
-                    PageExtractionDiagnostic(
-                        page_number=i,
-                        has_text=False,
-                        used_ocr=False,
-                        ocr_confidence=None,
-                        image_count=image_count,
-                        vector_count=vector_count,
-                        text_length=0,
-                    )
-                )
+            page_text = "[No extractable text found on this page]"
+        chunks.append(f"\n\n--- Page {i} ---\n{page_text}")
+        diagnostics.append(
+            PageExtractionDiagnostic(
+                page_number=i,
+                has_text=bool(t),
+                used_ocr=use_ocr_text,
+                ocr_confidence=ocr_confidence if use_ocr_text else None,
+                image_count=image_count,
+                vector_count=vector_count,
+                text_length=len(page_text) if t or use_ocr_text else 0,
+            )
+        )
     return "\n".join(chunks).strip(), pages, ocr_pages, diagnostics, visuals
