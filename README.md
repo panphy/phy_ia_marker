@@ -26,7 +26,7 @@ Modern Streamlit workspace for reviewing IB DP Physics scientific investigations
 
 ## Development
 
-Install `requirements.txt`, then run `streamlit run app.py` or `pytest tests/`. PDF rendering and OCR require Poppler and Tesseract, respectively. Set `OPENAI_API_KEY` and `APP_PASSWORD` through Streamlit secrets or environment variables before running the app. Keep secrets and student PDFs out of the repository.
+Install `requirements.txt`, then run `streamlit run app.py` or `pytest tests/`. PDF rendering uses the bundled PDFium package; OCR requires Tesseract. Streamlit Community Cloud installs Tesseract from `packages.txt`. Set `OPENAI_API_KEY` and `APP_PASSWORD` through Streamlit secrets or environment variables before running the app. Keep secrets and student PDFs out of the repository.
 
 ## Usage
 1. Open the app in your browser.
@@ -78,7 +78,7 @@ The **Technical details** panel can download a scoring record containing marks, 
 ## Troubleshooting
 - **No extractable text**: enable OCR or verify your PDF isn’t image-only.
 - **OCR errors**: confirm Tesseract is installed and the language code exists.
-- **PDF extraction errors**: ensure Poppler is installed and accessible.
+- **PDF rendering errors**: check that the PDF opens normally and its password is correct; Poppler is not required.
 - **Rate limits/timeouts**: retry after a short delay.
 - **Encrypted PDFs**: provide the password in the sidebar if prompted.
 

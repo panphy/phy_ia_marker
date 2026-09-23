@@ -3,9 +3,8 @@ import re
 from dataclasses import dataclass, replace
 from typing import Tuple
 
+import pypdfium2 as pdfium
 from PIL import Image
-from pdf2image import convert_from_bytes
-from pdf2image.exceptions import PDFInfoNotInstalledError, PDFPageCountError, PDFSyntaxError
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 import pytesseract
@@ -77,16 +76,6 @@ class PdfPasswordRequiredError(PdfExtractionError):
     pass
 
 
-def _format_pdf_render_error(exc: Exception) -> str:
-    if isinstance(exc, PDFInfoNotInstalledError):
-        return "Poppler is not installed or not available on PATH. Install Poppler and try again."
-    if isinstance(exc, PDFPageCountError):
-        return "Unable to render the PDF page for OCR. If the PDF is encrypted, check the password."
-    if isinstance(exc, PDFSyntaxError):
-        return "Unable to render the PDF page for OCR because the PDF appears malformed."
-    return "Unable to render the PDF page for OCR. Check Poppler and the PDF file, then try again."
-
-
 def _format_tesseract_error(exc: Exception, language: str) -> str:
     if isinstance(exc, TesseractNotFoundError):
         return "Tesseract is not installed or not available on PATH. Install Tesseract and try again."
@@ -98,24 +87,32 @@ def _format_tesseract_error(exc: Exception, language: str) -> str:
     return "Tesseract OCR failed. Check the OCR installation and try again."
 
 
+def _render_pdf_page(
+    file_bytes: bytes,
+    page_number: int,
+    dpi: int,
+    pdf_password: str | None,
+) -> Image.Image:
+    """Render one PDF page with bundled PDFium; no system Poppler is needed."""
+    try:
+        with pdfium.PdfDocument(file_bytes, password=pdf_password) as document:
+            if not 1 <= page_number <= len(document):
+                raise PdfExtractionError(f"Page {page_number} is outside the PDF.")
+            return document[page_number - 1].render(scale=dpi / 72).to_pil().copy()
+    except (pdfium.PdfiumError, OSError, ValueError) as exc:
+        raise PdfExtractionError(
+            f"Unable to render Page {page_number} for OCR or visual review. "
+            "Check that the PDF opens correctly."
+        ) from exc
+
+
 def ocr_pdf_page(
     file_bytes: bytes,
     page_number: int,
     language: str,
     pdf_password: str | None = None,
 ) -> tuple[str, float | None]:
-    try:
-        images = convert_from_bytes(
-            file_bytes,
-            first_page=page_number,
-            last_page=page_number,
-            userpw=pdf_password,
-        )
-    except (PDFInfoNotInstalledError, PDFPageCountError, PDFSyntaxError) as exc:
-        raise PdfExtractionError(_format_pdf_render_error(exc)) from exc
-    if not images:
-        return "", None
-    image = images[0]
+    image = _render_pdf_page(file_bytes, page_number, dpi=200, pdf_password=pdf_password)
     try:
         text = pytesseract.image_to_string(image, lang=language).strip()
     except (TesseractNotFoundError, TesseractError) as exc:
@@ -309,18 +306,9 @@ def render_pdf_page_image(
     pdf_password: str | None = None,
 ) -> tuple[bytes | None, str | None]:
     try:
-        images = convert_from_bytes(
-            file_bytes,
-            first_page=page_number,
-            last_page=page_number,
-            dpi=dpi,
-            userpw=pdf_password,
-        )
-    except Exception:
+        image = _render_pdf_page(file_bytes, page_number, dpi, pdf_password)
+    except PdfExtractionError:
         return None, None
-    if not images:
-        return None, None
-    image = images[0]
     buffer = io.BytesIO()
     try:
         image.save(buffer, format="PNG")
