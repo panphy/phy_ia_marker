@@ -22,6 +22,11 @@ Modern Streamlit workspace for reviewing IB DP Physics scientific investigations
 - `eval_marking.py` — compare exported scoring records with qualified human marks.
 - `tests/` — unit tests for prompt QA and PDF extraction utilities.
 - `tasks.md` — roadmap and follow-up tasks.
+- `AGENTS.md` — concise contributor guidance and marking safeguards; `CLAUDE.md` points to it.
+
+## Development
+
+Install `requirements.txt`, then run `streamlit run app.py` or `pytest tests/`. PDF rendering and OCR require Poppler and Tesseract, respectively. Set `OPENAI_API_KEY` and `APP_PASSWORD` through Streamlit secrets or environment variables before running the app. Keep secrets and student PDFs out of the repository.
 
 ## Usage
 1. Open the app in your browser.
