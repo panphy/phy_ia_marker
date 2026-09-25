@@ -17,13 +17,14 @@ Modern Streamlit workspace for reviewing IB DP Physics scientific investigations
 - **Password gate + cooldown** to reduce unauthorized access attempts.
 
 ## Repository layout
-- `app.py` — Streamlit UI and theme CSS, extraction flow, OpenAI calls, and report generation.
+- `app.py` — Streamlit UI and theme CSS, extraction flow, stage runners, and report generation.
+- `llm_utils.py` — OpenAI calls, digesting and visual analysis, kept free of Streamlit so they can be tested.
 - `app_utils.py` — prompt QA helpers, page chunking, report validation and parsing, moderation routing, quote checks, and scoring-record export.
-- `pdf_utils.py` — PDF parsing, encryption detection, OCR, and visual extraction helpers.
+- `pdf_utils.py` — PDF parsing, encryption detection, page rendering (once per page), OCR, and visual extraction helpers.
 - `criteria/ib_phy_ia_criteria.md` — rubric content used in prompts.
 - `prompts/` — prompt templates for the primary marker, evidence auditor and moderator.
 - `eval_marking.py` — compare exported scoring records with qualified human marks.
-- `tests/` — unit tests for marking safeguards, report parsing, prompts, and PDF extraction.
+- `tests/` — unit tests for marking safeguards, report parsing, prompts, PDF extraction, and the model-calling helpers (with a fake client, never the real API).
 - `.streamlit/config.toml` — theme colours (kept in sync with the CSS tokens in `app.py`) and toolbar settings.
 - `assets/` — PanPhy logo and favicon. The header logo links to https://panphy.app.
 - `todo.md` — the single list of open work, in recommended order.
@@ -51,7 +52,7 @@ Install `requirements.txt`, then run `streamlit run app.py` or `pytest tests/`. 
   labels so citations can still reference where evidence came from. Digested IAs always go to the
   Chief Moderator, because the audit cannot check the full text.
 - **Visual analysis**: vector graphics are rasterized per page. Optional extra vision summaries are off by default; selected original visuals still go directly to marking calls.
-- **Storage**: `STORE_RESPONSES` is `False` by default for privacy.
+- **Storage**: `STORE_RESPONSES` (in `llm_utils.py`) is `False` by default for privacy.
 - **Password throttle**: the app shares a 5-minute cooldown across browser sessions in one server process after five failed attempts. Deployments with multiple worker processes need an external shared rate limiter.
 - **Encrypted PDFs**: a password field appears below the upload box when the PDF needs one.
 - **Model details**: the marking and visual models and the rubric version are listed under **Advanced** in the sidebar.

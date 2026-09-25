@@ -4,9 +4,10 @@ This Streamlit app reviews IB DP Physics IAs against the four criteria in `crite
 
 ## Where to work
 
-- `app.py`: UI, theme CSS, session state, assessment flow, OpenAI calls, and report downloads.
+- `app.py`: UI, theme CSS, session state, assessment flow, stage runners, and report downloads. It runs the Streamlit page on import, so keep testable logic in the modules below.
+- `llm_utils.py`: OpenAI calls (`call_llm`, `call_vision_llm`), digesting, visual analysis, `STORE_RESPONSES` and the anti-injection instructions. Free of Streamlit; usage is reported through an `on_usage` callback.
 - `app_utils.py`: page evidence, prompt helpers, report validation and parsing, moderation routing, quote checks, and score exports.
-- `pdf_utils.py`: PDF text, OCR, encryption detection, and source-image extraction.
+- `pdf_utils.py`: PDF text, OCR, encryption detection, and source-image extraction. `PageRenderer` renders each page once for both OCR and rasterization; skipped PDF structures are logged, not silently dropped.
 - `prompts/`: primary marker, evidence auditor, and Chief Moderator instructions.
 - `eval_marking.py`: offline comparison with human marks.
 - `.streamlit/config.toml`: theme colours and toolbar settings.

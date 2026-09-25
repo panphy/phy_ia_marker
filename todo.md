@@ -139,32 +139,7 @@ or improves, and escalation stays reasonable. Record both results here, and bump
 
 ## Engineering (any time; no effect on marks)
 
-### [ ] 13. Render each PDF page at most once
-- **Why:** `extract_pdf_text` in `pdf_utils.py` can render the same page twice: once for vector
-  rasterization (`render_pdf_page_image`) and once for OCR (`ocr_pdf_page`), both at 200 DPI.
-  `_render_pdf_page` also reopens the whole PDF for every page. Large IAs are slow to prepare.
-- **What:** open the `pdfium` document once per extraction and share one rendered image per page between
-  OCR and rasterization. Consider a configurable DPI. Keep the password handling and the existing
-  rendering tests.
-
-### [ ] 14. Narrow broad exception handlers
-- **Why:** `pdf_utils.py` has about 17 `except Exception:` blocks. Several silently drop images, text or
-  OCR results, which hides extraction problems.
-- **What:** catch the specific pypdf, Pillow, pypdfium2 and pytesseract errors where possible. Record
-  anything unexpected in the page diagnostics or `debug_info` instead of discarding it. Keep the broad
-  catches that exist on purpose to fail safe: `pdf_requires_password`, where full extraction reports the
-  error, and `available_ocr_languages`, which falls back to English.
-
-### [ ] 15. Unit tests for the model-calling helpers
-- **Why:** `call_llm`, `call_vision_llm`, `analyze_visuals` and `make_structured_digest` in `app.py` have
-  no tests.
-- **What:** use a fake OpenAI client to cover:
-  - incomplete, empty and error responses mapping to `LLMError`;
-  - `store=False` always sent;
-  - digest chunk page labels preserved;
-  - visual sampling limits and the output sanitizer.
-
-  Never call the real API in tests.
+No open items. Add new engineering tasks here.
 
 ---
 
@@ -204,5 +179,10 @@ Details are in git history and the merged PRs.
   - simplified sidebar;
   - password prompt only for encrypted PDFs;
   - results with a prominent total and one status banner.
+- **Engineering (Sept 2026):**
+  - model-calling helpers moved from `app.py` to `llm_utils.py` and covered by fake-client tests;
+  - `PageRenderer` opens each PDF once and renders each page once for OCR and vector rasterization;
+  - narrow exception handling in `pdf_utils.py` where errors are known, with skipped PDF structures
+    logged rather than silently dropped, and the unused `count_page_images` removed.
 - **Dropped:** "Fix dataclass Exception inheritance". `LLMError` has an explicit `__init__`, and
   `str(PdfExtractionError("msg"))` already returns the message.
