@@ -22,7 +22,8 @@ Modern Streamlit workspace for reviewing IB DP Physics scientific investigations
 - `prompts/` — prompt templates for the primary marker, evidence auditor and moderator.
 - `eval_marking.py` — compare exported scoring records with qualified human marks.
 - `tests/` — unit tests for prompt QA and PDF extraction utilities.
-- `tasks.md` — roadmap and follow-up tasks.
+- `todo.md` — follow-up tasks for the marking pipeline and UI.
+- `tasks.md` — PDF extraction roadmap.
 - `AGENTS.md` — concise contributor guidance and marking safeguards; `CLAUDE.md` points to it.
 
 ## Development

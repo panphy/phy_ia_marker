@@ -9,7 +9,7 @@ This Streamlit app reviews IB DP Physics IAs against the four criteria in `crite
 - `pdf_utils.py`: PDF text, OCR, and source-image extraction.
 - `prompts/`: primary marker, evidence auditor, and Chief Moderator instructions.
 - `eval_marking.py`: offline comparison with human marks.
-- `tests/`: regression tests. `tasks.md` tracks remaining work.
+- `tests/`: regression tests. `todo.md` tracks follow-ups from the latest review (start there); `tasks.md` holds the older extraction roadmap.
 
 ## Assessment flow
 
