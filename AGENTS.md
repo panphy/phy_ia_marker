@@ -11,7 +11,7 @@ This Streamlit app reviews IB DP Physics IAs against the four criteria in `crite
 - `eval_marking.py`: offline comparison with human marks.
 - `.streamlit/config.toml`: theme colours and toolbar settings.
 - `tests/`: regression tests.
-- `todo.md`: follow-ups from the latest review. Start there. `tasks.md` holds the older PDF-extraction roadmap.
+- `todo.md`: the single list of open work. Start there.
 
 ## Assessment flow
 
