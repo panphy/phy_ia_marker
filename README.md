@@ -26,8 +26,7 @@ Modern Streamlit workspace for reviewing IB DP Physics scientific investigations
 - `tests/` — unit tests for marking safeguards, report parsing, prompts, and PDF extraction.
 - `.streamlit/config.toml` — theme colours (kept in sync with the CSS tokens in `app.py`) and toolbar settings.
 - `assets/` — PanPhy logo and favicon. The header logo links to https://panphy.app.
-- `todo.md` — follow-up tasks for the marking pipeline and UI.
-- `tasks.md` — PDF extraction roadmap.
+- `todo.md` — the single list of open work, in recommended order.
 - `AGENTS.md` — concise contributor guidance and marking safeguards; `CLAUDE.md` points to it.
 
 ## Development
@@ -99,5 +98,4 @@ The **Technical details** panel can download a scoring record containing marks, 
 - **Unverified quote warnings**: the quoted text wasn't found in the extracted text of the cited page. It may be fabricated, or the page may have extracted poorly (for example through OCR). Check the original PDF.
 
 ## Roadmap
-- `todo.md` — marking-pipeline and UI follow-ups: measure against human marks first, then improve the prompts.
-- `tasks.md` — extraction and visual-understanding upgrades, so unread photos, diagrams, graphs and tables are surfaced explicitly rather than marked unfairly.
+Open work is tracked in `todo.md`. Measuring against human marks comes first, then prompt improvements; engineering tasks such as faster page rendering and tighter error handling can be done at any time.
