@@ -28,20 +28,20 @@ every task here.
   and moderator comments. Export a scoring record for each run (the "Download scoring record" button,
   built by `build_evaluation_record` in `app_utils.py`), add `human_marks` and `human_review_required`,
   and save as JSONL outside the repo. Use these IAs as the regression set for every marking change.
-- **Files:** `eval_marking.py`, `app_utils.py` (`build_evaluation_record`).
-- **Add to the report:**
-  - accuracy of the primary mark, the audit mark and the final mark, each against the human marks
-    (records already hold `primary_marks` and `audit_marks`);
-  - escalation rate, split by `decision_mode`;
-  - how often each escalation reason fires. Group reason strings by prefix, because they contain marks.
-- **Done when:** `python eval_marking.py records.jsonl` prints per-stage exact / within-one / MAE figures
-  and escalation stats. Tests cover the new calculations using synthetic records only.
+- **Tooling: done (Sept 2026).** `python eval_marking.py records.jsonl` reports accuracy for each stage
+  (`stages.primary`, `stages.audit`, `stages.final`), `decision_modes`, `escalation_rate`, and
+  `escalation_reasons` grouped with marks and counts replaced by `#`. It's tested with synthetic records.
+- **Remaining (needs the user):** collect the IAs and human marks, run the report, and record the
+  baseline figures here.
+- **Done when:** baseline per-stage accuracy and escalation figures for the set are recorded here.
 
 ### [ ] 2. Measure run-to-run variance
 - **Why:** each stage is sampled once. Unstable marks are a hidden risk and could become an escalation
   signal.
-- **What:** add an offline script, or an `eval_marking.py` mode, that compares records from repeated runs
-  of the same `case_id` and reports the spread per criterion.
+- **Tooling: done (Sept 2026).** `python eval_marking.py --variance records.jsonl` groups repeated runs
+  by `case_id` and reports each criterion's mean spread and changed rate, plus total spread and
+  the share of cases where any mark changed. It needs no human marks.
+- **Remaining:** mark each evaluation IA at least twice, export the records, and run the report.
 - **Done when:** the spread per criterion is reported for the evaluation set. Record the baseline here.
 
 ### [ ] 3. Measure how often the quote check flags genuine quotes
@@ -139,32 +139,7 @@ or improves, and escalation stays reasonable. Record both results here, and bump
 
 ## Engineering (any time; no effect on marks)
 
-### [ ] 13. Render each PDF page at most once
-- **Why:** `extract_pdf_text` in `pdf_utils.py` can render the same page twice: once for vector
-  rasterization (`render_pdf_page_image`) and once for OCR (`ocr_pdf_page`), both at 200 DPI.
-  `_render_pdf_page` also reopens the whole PDF for every page. Large IAs are slow to prepare.
-- **What:** open the `pdfium` document once per extraction and share one rendered image per page between
-  OCR and rasterization. Consider a configurable DPI. Keep the password handling and the existing
-  rendering tests.
-
-### [ ] 14. Narrow broad exception handlers
-- **Why:** `pdf_utils.py` has about 17 `except Exception:` blocks. Several silently drop images, text or
-  OCR results, which hides extraction problems.
-- **What:** catch the specific pypdf, Pillow, pypdfium2 and pytesseract errors where possible. Record
-  anything unexpected in the page diagnostics or `debug_info` instead of discarding it. Keep the broad
-  catches that exist on purpose to fail safe: `pdf_requires_password`, where full extraction reports the
-  error, and `available_ocr_languages`, which falls back to English.
-
-### [ ] 15. Unit tests for the model-calling helpers
-- **Why:** `call_llm`, `call_vision_llm`, `analyze_visuals` and `make_structured_digest` in `app.py` have
-  no tests.
-- **What:** use a fake OpenAI client to cover:
-  - incomplete, empty and error responses mapping to `LLMError`;
-  - `store=False` always sent;
-  - digest chunk page labels preserved;
-  - visual sampling limits and the output sanitizer.
-
-  Never call the real API in tests.
+No open items. Add new engineering tasks here.
 
 ---
 
@@ -204,5 +179,10 @@ Details are in git history and the merged PRs.
   - simplified sidebar;
   - password prompt only for encrypted PDFs;
   - results with a prominent total and one status banner.
+- **Engineering (Sept 2026):**
+  - model-calling helpers moved from `app.py` to `llm_utils.py` and covered by fake-client tests;
+  - `PageRenderer` opens each PDF once and renders each page once for OCR and vector rasterization;
+  - narrow exception handling in `pdf_utils.py` where errors are known, with skipped PDF structures
+    logged rather than silently dropped, and the unused `count_page_images` removed.
 - **Dropped:** "Fix dataclass Exception inheritance". `LLMError` has an explicit `__init__`, and
   `str(PdfExtractionError("msg"))` already returns the message.

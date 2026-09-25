@@ -1,4 +1,5 @@
 import io
+import logging
 import re
 from dataclasses import dataclass, replace
 from typing import Tuple
@@ -11,6 +12,17 @@ import pytesseract
 from pytesseract.pytesseract import TesseractError, TesseractNotFoundError
 
 from app_utils import scan_injection_phrases
+
+logger = logging.getLogger(__name__)
+
+# Student PDFs are untrusted and often malformed. pypdf can raise many different exception
+# types while walking page structure, so those reads keep a broad catch, but every skipped
+# item is logged rather than silently dropped. Narrow errors are caught where they are known.
+
+
+def _log_skipped(what: str, page_number: int | None = None) -> None:
+    location = f" on page {page_number}" if page_number is not None else ""
+    logger.warning("Skipped %s%s", what, location, exc_info=True)
 
 
 @dataclass(frozen=True)
@@ -114,23 +126,66 @@ def _format_tesseract_error(exc: Exception, language: str) -> str:
     return "Tesseract OCR failed. Check the OCR installation and try again."
 
 
+RENDER_DPI = 200  # shared by OCR and vector rasterization so one render serves both
+
+
+class PageRenderer:
+    """Render PDF pages with bundled PDFium (no system Poppler needed).
+
+    The document is opened once and the latest rendered page is kept, so OCR and vector
+    rasterization of the same page share a single render. Use as a context manager.
+    """
+
+    def __init__(self, file_bytes: bytes, pdf_password: str | None = None) -> None:
+        self._file_bytes = file_bytes
+        self._pdf_password = pdf_password
+        self._document: pdfium.PdfDocument | None = None
+        self._cached: tuple[tuple[int, int], Image.Image] | None = None
+        self.render_count = 0
+
+    def __enter__(self) -> "PageRenderer":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._document is not None:
+            self._document.close()
+            self._document = None
+        self._cached = None
+
+    def render(self, page_number: int, dpi: int = RENDER_DPI) -> Image.Image:
+        key = (page_number, dpi)
+        if self._cached and self._cached[0] == key:
+            return self._cached[1]
+        try:
+            if self._document is None:
+                self._document = pdfium.PdfDocument(self._file_bytes, password=self._pdf_password)
+            if not 1 <= page_number <= len(self._document):
+                raise PdfExtractionError(f"Page {page_number} is outside the PDF.")
+            image = self._document[page_number - 1].render(scale=dpi / 72).to_pil().copy()
+        except (pdfium.PdfiumError, OSError, ValueError) as exc:
+            raise PdfExtractionError(
+                f"Unable to render Page {page_number} for OCR or visual review. "
+                "Check that the PDF opens correctly."
+            ) from exc
+        self.render_count += 1
+        self._cached = (key, image)
+        return image
+
+
 def _render_pdf_page(
     file_bytes: bytes,
     page_number: int,
     dpi: int,
     pdf_password: str | None,
+    renderer: PageRenderer | None = None,
 ) -> Image.Image:
-    """Render one PDF page with bundled PDFium; no system Poppler is needed."""
-    try:
-        with pdfium.PdfDocument(file_bytes, password=pdf_password) as document:
-            if not 1 <= page_number <= len(document):
-                raise PdfExtractionError(f"Page {page_number} is outside the PDF.")
-            return document[page_number - 1].render(scale=dpi / 72).to_pil().copy()
-    except (pdfium.PdfiumError, OSError, ValueError) as exc:
-        raise PdfExtractionError(
-            f"Unable to render Page {page_number} for OCR or visual review. "
-            "Check that the PDF opens correctly."
-        ) from exc
+    if renderer is not None:
+        return renderer.render(page_number, dpi)
+    with PageRenderer(file_bytes, pdf_password) as single_use:
+        return single_use.render(page_number, dpi)
 
 
 def ocr_pdf_page(
@@ -138,8 +193,10 @@ def ocr_pdf_page(
     page_number: int,
     language: str,
     pdf_password: str | None = None,
+    *,
+    renderer: PageRenderer | None = None,
 ) -> tuple[str, float | None]:
-    image = _render_pdf_page(file_bytes, page_number, dpi=200, pdf_password=pdf_password)
+    image = _render_pdf_page(file_bytes, page_number, RENDER_DPI, pdf_password, renderer)
     try:
         text = pytesseract.image_to_string(image, lang=language).strip()
     except (TesseractNotFoundError, TesseractError) as exc:
@@ -167,21 +224,11 @@ def ocr_pdf_page(
     return text, confidence
 
 
-def count_page_images(page: object) -> int:
-    try:
-        images = page.images
-    except Exception:
-        return 0
-    try:
-        return len(images)
-    except TypeError:
-        return 0
-
-
 def extract_page_images(page: object, page_number: int) -> list[ExtractedVisual]:
     try:
         images = list(page.images)
     except Exception:
+        _log_skipped("embedded images", page_number)
         return []
 
     extracted: list[ExtractedVisual] = []
@@ -194,11 +241,11 @@ def extract_page_images(page: object, page_number: int) -> list[ExtractedVisual]
         if pil_image is not None:
             try:
                 width, height = pil_image.size
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 width = height = None
             try:
                 image_format = (pil_image.format or "").lower() or None
-            except Exception:
+            except (AttributeError, TypeError):
                 image_format = None
             if not data:
                 buffer = io.BytesIO()
@@ -207,7 +254,8 @@ def extract_page_images(page: object, page_number: int) -> list[ExtractedVisual]
                     pil_image.save(buffer, format=save_format)
                     data = buffer.getvalue()
                     image_format = image_format or save_format.lower()
-                except Exception:
+                except (OSError, ValueError, KeyError):
+                    _log_skipped(f"image data for {getattr(image, 'name', 'image')}", page_number)
                     data = b""
         extracted.append(
             ExtractedVisual(
@@ -243,6 +291,7 @@ def _collect_content_streams(page: object) -> list[bytes]:
     try:
         contents = page.get_contents()
     except Exception:
+        _log_skipped("page content streams")
         return []
     if contents is None:
         return []
@@ -252,6 +301,7 @@ def _collect_content_streams(page: object) -> list[bytes]:
         try:
             data_list.append(stream.get_data())
         except Exception:
+            _log_skipped("a page content stream")
             continue
     return data_list
 
@@ -275,7 +325,7 @@ def extract_vector_graphics(page: object, page_number: int) -> list[ExtractedVis
             try:
                 width = int(media_box.width)
                 height = int(media_box.height)
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 width = height = None
         extracted.append(
             ExtractedVisual(
@@ -292,17 +342,20 @@ def extract_vector_graphics(page: object, page_number: int) -> list[ExtractedVis
         resources = page.get("/Resources") or {}
         xobjects = resources.get("/XObject") or {}
     except Exception:
+        _log_skipped("form XObjects", page_number)
         xobjects = {}
     for name, xobject_ref in xobjects.items():
         try:
             xobject = xobject_ref.get_object()
         except Exception:
+            _log_skipped(f"form XObject {name}", page_number)
             continue
         if xobject.get("/Subtype") != "/Form":
             continue
         try:
             data = xobject.get_data()
         except Exception:
+            _log_skipped(f"form XObject data {name}", page_number)
             data = b""
         width = height = None
         bbox = xobject.get("/BBox")
@@ -310,7 +363,7 @@ def extract_vector_graphics(page: object, page_number: int) -> list[ExtractedVis
             try:
                 width = int(bbox[2] - bbox[0])
                 height = int(bbox[3] - bbox[1])
-            except Exception:
+            except (TypeError, ValueError):
                 width = height = None
         extracted.append(
             ExtractedVisual(
@@ -329,17 +382,20 @@ def extract_vector_graphics(page: object, page_number: int) -> list[ExtractedVis
 def render_pdf_page_image(
     file_bytes: bytes,
     page_number: int,
-    dpi: int = 200,
+    dpi: int = RENDER_DPI,
     pdf_password: str | None = None,
+    *,
+    renderer: PageRenderer | None = None,
 ) -> tuple[bytes | None, str | None]:
     try:
-        image = _render_pdf_page(file_bytes, page_number, dpi, pdf_password)
+        image = _render_pdf_page(file_bytes, page_number, dpi, pdf_password, renderer)
     except PdfExtractionError:
         return None, None
     buffer = io.BytesIO()
     try:
         image.save(buffer, format="PNG")
-    except Exception:
+    except (OSError, ValueError):
+        _log_skipped("PNG encoding of the rendered page", page_number)
         return None, None
     return buffer.getvalue(), "png"
 
@@ -390,68 +446,72 @@ def extract_pdf_text(
     ocr_pages = 0
     diagnostics: list[PageExtractionDiagnostic] = []
     visuals: list[ExtractedVisual] = []
-    for i, page in enumerate(reader.pages, start=1):
-        page_images = extract_page_images(page, page_number=i)
-        image_count = len(page_images)
-        page_vectors = extract_vector_graphics(page, page_number=i)
-        if page_vectors:
-            rasterized_data, rasterized_format = render_pdf_page_image(
-                file_bytes,
-                page_number=i,
-                pdf_password=pdf_password,
-            )
-            if rasterized_data:
-                page_vectors = [
-                    replace(
-                        visual,
-                        rasterized_data=rasterized_data,
-                        rasterized_format=rasterized_format,
-                    )
-                    for visual in page_vectors
-                ]
-        visuals.extend(page_images)
-        visuals.extend(page_vectors)
-        vector_count = len(page_vectors)
-        try:
-            t = page.extract_text() or ""
-        except Exception:
-            t = ""
-        t = re.sub(r"[ \t]+", " ", t).strip()
-        # A selectable page number or header can sit on top of an otherwise scanned page.
-        # OCR short text pages with visual content instead of treating them as complete.
-        needs_ocr = use_ocr and (not t or (len(t) < 80 and (page_images or page_vectors)))
-        ocr_text = ""
-        ocr_confidence = None
-        if needs_ocr:
-            ocr_text, ocr_confidence = ocr_pdf_page(
-                file_bytes,
-                page_number=i,
-                language=ocr_language,
-                pdf_password=pdf_password,
-            )
-        use_ocr_text = bool(ocr_text) and (not t or len(ocr_text) > len(t) + 20)
-        if use_ocr_text:
-            ocr_pages += 1
-        if t:
-            page_text = t
+    with PageRenderer(file_bytes, pdf_password) as renderer:
+        for i, page in enumerate(reader.pages, start=1):
+            page_images = extract_page_images(page, page_number=i)
+            image_count = len(page_images)
+            page_vectors = extract_vector_graphics(page, page_number=i)
+            if page_vectors:
+                rasterized_data, rasterized_format = render_pdf_page_image(
+                    file_bytes,
+                    page_number=i,
+                    pdf_password=pdf_password,
+                    renderer=renderer,
+                )
+                if rasterized_data:
+                    page_vectors = [
+                        replace(
+                            visual,
+                            rasterized_data=rasterized_data,
+                            rasterized_format=rasterized_format,
+                        )
+                        for visual in page_vectors
+                    ]
+            visuals.extend(page_images)
+            visuals.extend(page_vectors)
+            vector_count = len(page_vectors)
+            try:
+                t = page.extract_text() or ""
+            except Exception:
+                _log_skipped("selectable text", i)
+                t = ""
+            t = re.sub(r"[ \t]+", " ", t).strip()
+            # A selectable page number or header can sit on top of an otherwise scanned page.
+            # OCR short text pages with visual content instead of treating them as complete.
+            needs_ocr = use_ocr and (not t or (len(t) < 80 and (page_images or page_vectors)))
+            ocr_text = ""
+            ocr_confidence = None
+            if needs_ocr:
+                ocr_text, ocr_confidence = ocr_pdf_page(
+                    file_bytes,
+                    page_number=i,
+                    language=ocr_language,
+                    pdf_password=pdf_password,
+                    renderer=renderer,
+                )
+            use_ocr_text = bool(ocr_text) and (not t or len(ocr_text) > len(t) + 20)
             if use_ocr_text:
-                page_text += f"\n[OCR supplement]\n{ocr_text}"
-        elif use_ocr_text:
-            page_text = f"[OCR]\n{ocr_text}"
-        else:
-            page_text = "[No extractable text found on this page]"
-        chunks.append(f"\n\n--- Page {i} ---\n{page_text}")
-        diagnostics.append(
-            PageExtractionDiagnostic(
-                page_number=i,
-                has_text=bool(t),
-                used_ocr=use_ocr_text,
-                ocr_confidence=ocr_confidence if use_ocr_text else None,
-                image_count=image_count,
-                vector_count=vector_count,
-                text_length=len(page_text) if t or use_ocr_text else 0,
+                ocr_pages += 1
+            if t:
+                page_text = t
+                if use_ocr_text:
+                    page_text += f"\n[OCR supplement]\n{ocr_text}"
+            elif use_ocr_text:
+                page_text = f"[OCR]\n{ocr_text}"
+            else:
+                page_text = "[No extractable text found on this page]"
+            chunks.append(f"\n\n--- Page {i} ---\n{page_text}")
+            diagnostics.append(
+                PageExtractionDiagnostic(
+                    page_number=i,
+                    has_text=bool(t),
+                    used_ocr=use_ocr_text,
+                    ocr_confidence=ocr_confidence if use_ocr_text else None,
+                    image_count=image_count,
+                    vector_count=vector_count,
+                    text_length=len(page_text) if t or use_ocr_text else 0,
+                )
             )
-        )
     return "\n".join(chunks).strip(), pages, ocr_pages, diagnostics, visuals
 
 

@@ -17,13 +17,14 @@ Modern Streamlit workspace for reviewing IB DP Physics scientific investigations
 - **Password gate + cooldown** to reduce unauthorized access attempts.
 
 ## Repository layout
-- `app.py` — Streamlit UI and theme CSS, extraction flow, OpenAI calls, and report generation.
+- `app.py` — Streamlit UI and theme CSS, extraction flow, stage runners, and report generation.
+- `llm_utils.py` — OpenAI calls, digesting and visual analysis, kept free of Streamlit so they can be tested.
 - `app_utils.py` — prompt QA helpers, page chunking, report validation and parsing, moderation routing, quote checks, and scoring-record export.
-- `pdf_utils.py` — PDF parsing, encryption detection, OCR, and visual extraction helpers.
+- `pdf_utils.py` — PDF parsing, encryption detection, page rendering (once per page), OCR, and visual extraction helpers.
 - `criteria/ib_phy_ia_criteria.md` — rubric content used in prompts.
 - `prompts/` — prompt templates for the primary marker, evidence auditor and moderator.
 - `eval_marking.py` — compare exported scoring records with qualified human marks.
-- `tests/` — unit tests for marking safeguards, report parsing, prompts, and PDF extraction.
+- `tests/` — unit tests for marking safeguards, report parsing, prompts, PDF extraction, and the model-calling helpers (with a fake client, never the real API).
 - `.streamlit/config.toml` — theme colours (kept in sync with the CSS tokens in `app.py`) and toolbar settings.
 - `assets/` — PanPhy logo and favicon. The header logo links to https://panphy.app.
 - `todo.md` — the single list of open work, in recommended order.
@@ -51,7 +52,7 @@ Install `requirements.txt`, then run `streamlit run app.py` or `pytest tests/`. 
   labels so citations can still reference where evidence came from. Digested IAs always go to the
   Chief Moderator, because the audit cannot check the full text.
 - **Visual analysis**: vector graphics are rasterized per page. Optional extra vision summaries are off by default; selected original visuals still go directly to marking calls.
-- **Storage**: `STORE_RESPONSES` is `False` by default for privacy.
+- **Storage**: `STORE_RESPONSES` (in `llm_utils.py`) is `False` by default for privacy.
 - **Password throttle**: the app shares a 5-minute cooldown across browser sessions in one server process after five failed attempts. Deployments with multiple worker processes need an external shared rate limiter.
 - **Encrypted PDFs**: a password field appears below the upload box when the PDF needs one.
 - **Model details**: the marking and visual models and the rubric version are listed under **Advanced** in the sidebar.
@@ -86,7 +87,7 @@ The bundled rubric is sourced from the *Physics guide* (February 2023, updated N
 
 ## Calibration against human marks
 
-The **Technical details** panel can download a scoring record containing marks, route, model usage and a PDF-derived case ID, without the student's PDF or report text. Add `human_marks` for each of the four criteria and optionally `human_review_required` (a Boolean) to each record. Save one JSON object per line in a JSONL file, then run `python eval_marking.py records.jsonl`. Keep the human marks blind to the app's result where possible. Each record carries a `pipeline` label, which changes whenever the marking flow changes, so results from different versions aren't mixed. The comparison reports criterion and total mark error, within-one-mark rates, human-review recall and average API usage. Use the same IAs to compare this workflow with any previous or alternative pipeline; no quality claim should be inferred until such a set is evaluated. Building this set is the first item in `todo.md`, and later prompt changes depend on it.
+The **Technical details** panel can download a scoring record containing marks, route, model usage and a PDF-derived case ID, without the student's PDF or report text. Add `human_marks` for each of the four criteria and optionally `human_review_required` (a Boolean) to each record. Save one JSON object per line in a JSONL file, then run `python eval_marking.py records.jsonl`. Keep the human marks blind to the app's result where possible. Each record carries a `pipeline` label, which changes whenever the marking flow changes, so results from different versions aren't mixed. The comparison reports criterion and total mark error, within-one-mark rates, human-review recall and average API usage. It also gives the same accuracy figures separately for the primary mark, the audit and the final decision (`stages`), how cases were decided (`decision_modes`), and how often each escalation reason fired. To check consistency, mark the same IAs more than once and run `python eval_marking.py --variance records.jsonl`, which reports how much each criterion's mark changes between runs and needs no human marks. Use the same IAs to compare this workflow with any previous or alternative pipeline; no quality claim should be inferred until such a set is evaluated. Building this set is the first item in `todo.md`, and later prompt changes depend on it.
 
 ## Troubleshooting
 - **No extractable text**: enable OCR or verify your PDF isn’t image-only.
