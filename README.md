@@ -40,14 +40,15 @@ Install `requirements.txt`, then run `streamlit run app.py` or `pytest tests/`. 
 ## Configuration notes
 - **Models**: marking and visual analysis use `gpt-6-sol` through the Responses API.
 - **Reasoning**: marking and adjudication use high reasoning effort; evidence-preserving digest work uses low effort.
-- **OCR**: toggle in the sidebar; set OCR language via the text input.
+- **OCR**: toggle in the sidebar; choose an installed Tesseract language under **Advanced**.
 - **Digesting**: large PDFs are summarized into a structured digest before marking. The digest
   preserves key evidence (numbers, units, uncertainties, figures/tables) and keeps page-range
   labels so citations can still reference where evidence came from.
 - **Visual analysis**: vector graphics are rasterized per page. Optional extra vision summaries are off by default; selected original visuals still go directly to marking calls.
 - **Storage**: `STORE_RESPONSES` is `False` by default for privacy.
 - **Password throttle**: the app shares a 5-minute cooldown across browser sessions in one server process after five failed attempts. Deployments with multiple worker processes need an external shared rate limiter.
-- **Encrypted PDFs**: supply a PDF password in the sidebar if needed.
+- **Encrypted PDFs**: a password field appears below the upload box when the PDF needs one.
+- **Theme**: colours live in `.streamlit/config.toml` and the matching CSS tokens at the top of the UI section in `app.py`; keep them in sync.
 
 ## How marking works
 1. The PDF is parsed page-by-page. OCR is attempted on pages with no selectable text and on image-heavy pages with only a short selectable header (if enabled).
@@ -80,10 +81,10 @@ The **Technical details** panel can download a scoring record containing marks, 
 
 ## Troubleshooting
 - **No extractable text**: enable OCR or verify your PDF isn’t image-only.
-- **OCR errors**: confirm Tesseract is installed and the language code exists.
+- **OCR errors**: confirm Tesseract and the selected language data are installed.
 - **PDF rendering errors**: check that the PDF opens normally and its password is correct; Poppler is not required.
 - **Rate limits/timeouts**: retry after a short delay.
-- **Encrypted PDFs**: provide the password in the sidebar if prompted.
+- **Encrypted PDFs**: enter the password in the field below the upload box.
 
 ## Visual coverage roadmap
 To avoid unfair marks when PDFs contain photos, diagrams, graphs, or tables, see `tasks.md` for the planned extraction and visual-understanding upgrades that will surface unread content explicitly.

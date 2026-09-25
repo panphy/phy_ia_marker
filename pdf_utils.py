@@ -372,7 +372,7 @@ def extract_pdf_text(
         if not empty_password_ok:
             if not pdf_password:
                 raise PdfPasswordRequiredError(
-                    "This PDF is encrypted. Enter the password in the sidebar and try again."
+                    "This PDF is encrypted. Enter its password below the upload box and try again."
                 )
             try:
                 password_ok = reader.decrypt(pdf_password) != 0
@@ -453,3 +453,26 @@ def extract_pdf_text(
             )
         )
     return "\n".join(chunks).strip(), pages, ocr_pages, diagnostics, visuals
+
+
+def pdf_requires_password(file_bytes: bytes) -> bool:
+    """Return True when the PDF is encrypted and cannot be opened without a password."""
+    try:
+        reader = PdfReader(io.BytesIO(file_bytes))
+        return bool(reader.is_encrypted) and reader.decrypt("") == 0
+    except Exception:
+        # Let full extraction report unreadable files with its specific messages.
+        return False
+
+
+def available_ocr_languages() -> list[str]:
+    """Return installed Tesseract language codes, falling back to English."""
+    try:
+        languages = sorted(
+            code for code in pytesseract.get_languages(config="") if code and code != "osd"
+        )
+    except Exception:
+        languages = []
+    if "eng" in languages:
+        languages.remove("eng")
+    return ["eng", *languages]
