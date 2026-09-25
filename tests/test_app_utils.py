@@ -5,6 +5,7 @@ from app_utils import (
     LoginThrottle,
     PROMPT_QA_MARKER,
     apply_prompt_qa,
+    audit_mark_issues,
     audit_requests_review,
     build_agreed_decision,
     build_candidate_evidence_ledger,
@@ -14,13 +15,17 @@ from app_utils import (
     build_page_evidence_index,
     chunk_pages,
     extract_report_scores,
+    human_review_reason,
     moderation_reasons,
     report_has_expected_citations,
     report_page_issues,
+    report_requests_human_review,
+    report_stated_totals,
     report_validation_issues,
     redact_injection_spans,
     require_human_review,
     scan_injection_phrases,
+    unverified_quotes,
 )
 
 
@@ -96,6 +101,9 @@ def test_primary_and_auditor_prompts_have_distinct_jobs() -> None:
     assert "This lens must not override the rubric" in examiner1
     assert "Do not use invented universal thresholds" in examiner1
     assert "Escalation required" in examiner2
+    assert "### Research design — audited X/6" in examiner2
+    assert "heading mark must be your audited recommendation" in examiner2
+    assert extract_report_scores("### Research design — audited 5/6") == {"Research design": 5}
 
 
 def test_moderator_prompt_adjudicates_without_averaging() -> None:
@@ -185,10 +193,19 @@ def _complete_report(mark: int, audit_verdict: str | None = None) -> str:
         f"## Evidence audit\n- **Escalation required:** {audit_verdict}\n"
         if audit_verdict else "## Primary mark\n- **Human review recommended:** no\n"
     )
-    sections = "\n".join(
-        f"### {criterion} — {mark}/6\n- **Verified evidence:** Page 1 supports the decision."
-        for criterion in ("Research design", "Data analysis", "Conclusion", "Evaluation")
-    )
+    if audit_verdict:
+        sections = "\n".join(
+            f"### {criterion} — audited {mark}/6\n- **Primary mark:** {mark}/6\n"
+            "- **Verified evidence:** Page 1 supports the decision.\n"
+            "- **Unsupported or overstated claims:** None found\n"
+            f"- **Audited mark recommendation:** {mark}/6 — supported."
+            for criterion in ("Research design", "Data analysis", "Conclusion", "Evaluation")
+        )
+    else:
+        sections = "\n".join(
+            f"### {criterion} — {mark}/6\n- **Verified evidence:** Page 1 supports the decision."
+            for criterion in ("Research design", "Data analysis", "Conclusion", "Evaluation")
+        )
     return prefix + sections
 
 
@@ -300,3 +317,101 @@ def test_model_input_keeps_page_labels_with_source_images() -> None:
     assert content[2]["type"] == "input_image"
     assert content[2]["image_url"] == "data:image/png;base64,UE5H"
     assert content[2]["detail"] == "high"
+
+
+def test_audit_heading_must_match_its_recommendation() -> None:
+    primary = _complete_report(4)
+    audit = _complete_report(4, "no").replace(
+        "- **Audited mark recommendation:** 4/6 — supported.",
+        "- **Audited mark recommendation:** 5/6 — the gradient uncertainty is propagated.",
+        1,
+    )
+    issues = audit_mark_issues(primary, audit)
+    assert issues == ["Research design: audit heading 4/6 but recommendation 5/6"]
+    # The mismatch must stop an agreed decision even though the headings agree.
+    assert issues[0] in moderation_reasons(primary, audit, [], False, False)
+
+
+def test_audit_without_recommendation_or_with_misquoted_primary_is_escalated() -> None:
+    primary = _complete_report(4)
+    missing = _complete_report(4, "no").replace("- **Audited mark recommendation:** 4/6 — supported.", "", 1)
+    assert audit_mark_issues(primary, missing) == [
+        "Research design: the audit gave no clear mark recommendation"
+    ]
+    misquoted = _complete_report(4, "no").replace("- **Primary mark:** 4/6", "- **Primary mark:** 3/6", 1)
+    assert "quoted the primary mark as 3/6" in audit_mark_issues(primary, misquoted)[0]
+
+
+def test_stated_totals_must_match_criterion_marks() -> None:
+    moderator = (
+        "## Final decision\n- **Total:** 17/24\n"
+        + "\n".join(
+            f"### {criterion} — 4/6\n- **Verified evidence:** Page 1."
+            for criterion in ("Research design", "Data analysis", "Conclusion", "Evaluation")
+        )
+        + "\n| **Total** | **15** | **16** | **16** | **24** | |"
+    )
+    assert report_stated_totals(moderator) == [17, 16]
+    issues = report_validation_issues(moderator, used_digest=False)
+    assert "The stated total 17/24 does not match the criterion marks (16/24)." in issues
+
+    consistent = moderator.replace("17/24", "16/24")
+    assert not report_validation_issues(consistent, used_digest=False)
+    primary_table = "| **Total** | **24** | **24** | |"
+    assert report_stated_totals(primary_table) == [24]
+
+
+def test_final_human_review_verdict_is_read_with_reason() -> None:
+    report = "## Final decision\n- **Human review recommended:** yes — Page 4 graph is illegible.\n"
+    assert report_requests_human_review(report)
+    assert human_review_reason(report) == "Page 4 graph is illegible"
+    assert not report_requests_human_review(report.replace("yes", "no"))
+    assert report_requests_human_review("## Final decision without a verdict")
+
+
+def test_unverified_quotes_flags_text_missing_from_cited_page() -> None:
+    page_texts = {
+        1: "The period of the pendulum was measured with a stopwatch over ten oscillations. " * 4,
+        2: "Figure 2 shows the relationship between the square of the period and the length. " * 4,
+    }
+    report = "\n".join([
+        '- The student "measured with a stopwatch over ten oscillations" (Page 1).',
+        '- The student states "uncertainties were propagated through every calculation" (Page 2).',
+        '- Descriptor: "the research question is described within a specific and appropriate context" (Page 1).',
+        '- Near-verbatim: "shows the relation between the square of the period and length" (Page 2).',
+        '- Unchecked image page: "the graph has clear error bars on every point" (Page 3).',
+    ])
+    rubric = "The research question is described within a specific and appropriate context."
+    findings = unverified_quotes(report, page_texts | {3: "Figure 3"}, reference_text=rubric)
+    assert findings == [
+        {"quote": "uncertainties were propagated through every calculation", "pages": [2]}
+    ]
+
+
+def test_agreed_decision_keeps_auditor_notes_on_overstated_claims() -> None:
+    audit = _complete_report(4, "no").replace(
+        "- **Unsupported or overstated claims:** None found",
+        "- **Unsupported or overstated claims:** The claimed ±2% uncertainty is not shown (Page 3).",
+        1,
+    )
+    decision = build_agreed_decision(_complete_report(4), audit)
+    assert "- **Audit note:** The claimed ±2% uncertainty is not shown (Page 3)." in decision
+    assert decision.count("Audit note") == 1
+
+    plain = _complete_report(4, "no").replace(
+        "- **Unsupported or overstated claims:** None found",
+        "- Unsupported or overstated claims: Page 2 has no sample calculation.",
+        1,
+    ).replace("**Audited mark recommendation:**", "Audited mark recommendation:")
+    decision = build_agreed_decision(_complete_report(4), plain)
+    assert "- **Audit note:** Page 2 has no sample calculation." in decision
+
+
+def test_summary_and_quote_reasons_trigger_moderation() -> None:
+    primary = _complete_report(4)
+    audit = _complete_report(4, "no")
+    assert moderation_reasons(primary, audit, [], False, False, summary_used=True) == [
+        "The IA was summarised before marking, so the audit could not check the full text"
+    ]
+    reason = "Primary mark: 1 quoted excerpt was not found on the cited page"
+    assert moderation_reasons(primary, audit, [], False, False, unverified_quote_reasons=[reason]) == [reason]

@@ -23,14 +23,17 @@ from app_utils import (
     build_model_input,
     chunk_pages,
     extract_report_scores,
+    human_review_reason,
     moderation_reasons,
     redact_injection_spans,
     require_human_review,
     report_page_issues,
+    report_requests_human_review,
     report_validation_issues,
     sample_evenly,
     scan_injection_phrases,
     split_pages,
+    unverified_quotes,
 )
 from pdf_utils import (
     ExtractedVisual,
@@ -1156,6 +1159,8 @@ if "ia_evidence_index" not in st.session_state:
     st.session_state.ia_evidence_index = ""
 if "ia_evidence_ledger" not in st.session_state:
     st.session_state.ia_evidence_ledger = ""
+if "ia_source_text" not in st.session_state:
+    st.session_state.ia_source_text = ""
 if "ia_visual_analysis" not in st.session_state:
     st.session_state.ia_visual_analysis = ""
 if "moderation_reasons" not in st.session_state:
@@ -1190,6 +1195,7 @@ def reset_reports() -> None:
     st.session_state.ia_caption_pages = []
     st.session_state.ia_evidence_index = ""
     st.session_state.ia_evidence_ledger = ""
+    st.session_state.ia_source_text = ""
     st.session_state.ia_visual_analysis = ""
     st.session_state.moderation_reasons = []
     st.session_state.decision_mode = ""
@@ -1476,6 +1482,7 @@ def ensure_documents(
     st.session_state.ia_caption_pages = list(page_captions)
     st.session_state.ia_evidence_index = evidence_index
     st.session_state.ia_evidence_ledger = evidence_ledger
+    st.session_state.ia_source_text = ia_text
     st.session_state.ia_visual_analysis = visual_analysis_text
 
 
@@ -1533,6 +1540,30 @@ def run_evidence_audit(client: OpenAI, model: str, ia_ready: AIResult) -> str:
     return report
 
 
+def quote_check_findings(report: str, *earlier_reports: str) -> list[dict[str, object]]:
+    """Quoted excerpts in a report that are missing from the extracted text of the cited pages."""
+    if not report or not st.session_state.ia_source_text:
+        return []
+    page_texts = {
+        page_number: text.split("\n", 1)[-1]
+        for page_number, text in split_pages(st.session_state.ia_source_text)
+    }
+    reference = "\n".join(
+        [st.session_state.criteria_text, EXAMINER1_PROMPT, EXAMINER2_PROMPT, MODERATOR_PROMPT, *earlier_reports]
+    )
+    return unverified_quotes(report, page_texts, reference_text=reference)
+
+
+def quote_check_reason(label: str, findings: list[dict[str, object]]) -> list[str]:
+    if not findings:
+        return []
+    count = len(findings)
+    return [
+        f"{label}: {count} quoted excerpt{'s were' if count != 1 else ' was'} not found on the cited page"
+        f"{'s' if count != 1 else ''}"
+    ]
+
+
 def current_moderation_reasons() -> list[str]:
     visual_state = st.session_state.debug_info.get("visual_analysis", {})
     supplied_pages = {image.page_number for image in st.session_state.ia_source_images}
@@ -1549,6 +1580,14 @@ def current_moderation_reasons() -> list[str]:
         (bool(st.session_state.ia_extracted_visuals) and not bool(st.session_state.ia_source_images))
         or important_visual_missing,
         bool(st.session_state.ia_injection_findings or st.session_state.ia_visual_scan_failed_pages),
+        summary_used=st.session_state.ia_used_digest,
+        unverified_quote_reasons=(
+            quote_check_reason("Primary mark", quote_check_findings(st.session_state.examiner1_report))
+            + quote_check_reason(
+                "Evidence audit",
+                quote_check_findings(st.session_state.examiner2_report, st.session_state.examiner1_report),
+            )
+        ),
     )
 
 
@@ -1903,9 +1942,22 @@ if has_any_report:
         or st.session_state.examiner2_report
     )
     score_map = extract_report_scores(decision_report)
+    final_review_requested = bool(st.session_state.moderator_report) and report_requests_human_review(
+        st.session_state.moderator_report
+    )
+    final_quote_findings = (
+        quote_check_findings(
+            st.session_state.moderator_report,
+            st.session_state.examiner1_report,
+            st.session_state.examiner2_report,
+        )
+        if st.session_state.decision_mode == "moderated"
+        else []
+    )
     if len(score_map) == 4:
         total = sum(score_map.values())
-        total_label = "Provisional total" if security_review_required else (
+        needs_teacher_check = security_review_required or final_review_requested or bool(final_quote_findings)
+        total_label = "Provisional total" if needs_teacher_check else (
             "Final total" if st.session_state.moderator_report else "Proposed total"
         )
         criterion_cards = "".join(
@@ -1935,12 +1987,27 @@ if has_any_report:
                 "**Teacher review required before using these provisional marks.** "
                 "The IA contained a possible marker-directed instruction or a visual that could not be screened."
             )
+        elif final_review_requested:
+            status_kind = "warning"
+            reason = human_review_reason(st.session_state.moderator_report) or "the report gave no clear verdict"
+            status_message = f"**Teacher review recommended before using these marks.** {reason[:1].upper()}{reason[1:]}."
         elif st.session_state.decision_mode == "moderated":
             status_kind = "success"
             status_message = "**Final decision ready.** The flagged issues were reviewed by the Chief Moderator."
         else:
             status_kind = "success"
             status_message = "**Final decision ready.** The evidence audit confirmed all four marks."
+        if final_quote_findings:
+            if status_kind == "success":
+                status_kind = "warning"
+            listed = "; ".join(
+                f"“{str(item['quote'])[:120]}” (page {', '.join(map(str, item['pages']))})"
+                for item in final_quote_findings[:5]
+            )
+            status_message += (
+                f"  \n{len(final_quote_findings)} quoted excerpt(s) in the final decision were not found "
+                f"in the extracted text of the cited pages. Check them before use: {listed}"
+            )
         if reasons_text:
             status_message += f"  \nReview triggers: {reasons_text}"
         status_message += "  \nReview the cited pages in the original IA before using this mark."

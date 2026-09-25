@@ -56,8 +56,10 @@ Install `requirements.txt`, then run `streamlit run app.py` or `pytest tests/`. 
    context. The digest keeps page-range labels so evidence can still be cited.
 3. The app builds a page index and exact candidate excerpts for rubric areas; these are navigation aids, not verified claims. A primary marker applies all four criteria and cites original pages.
 4. An evidence auditor checks the primary claims against the IA and attached original visuals.
-5. Exact agreement with no evidence warning is finalized after audit. A mark difference, audit concern or coverage gap goes to the Chief Moderator.
-6. Suspected instructions aimed at the marker, or selected visuals that cannot be screened, prevent automatic sign-off. The app shows provisional marks and requires a teacher to inspect the original PDF.
+5. The app checks the reports without a model: the audit's heading mark must match its recommendation and its copy of the primary mark; stated totals must equal the criterion marks; and short quotes must appear in the extracted text of the cited page (image-only pages and rubric wording are skipped).
+6. Exact agreement with no evidence warning is finalized after audit, keeping any auditor note on overstated claims. A mark difference, audit concern, coverage gap, unverified quote, or use of a summarized IA goes to the Chief Moderator.
+7. If the Chief Moderator recommends human review, or quotes text that is not on the cited page, the app shows the marks as provisional and asks for teacher review.
+8. Suspected instructions aimed at the marker, or selected visuals that cannot be screened, prevent automatic sign-off. The app shows provisional marks and requires a teacher to inspect the original PDF.
 
 ## Rubric currency
 The bundled rubric is sourced from the *Physics guide* (February 2023, updated November 2024), first assessment 2025. The IB's 2026 Physics examiner instructions continue to use the same four criteria and 24-mark structure. Current-session application notes are recorded in `criteria/ib_phy_ia_criteria.md`.
