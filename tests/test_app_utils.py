@@ -415,3 +415,39 @@ def test_summary_and_quote_reasons_trigger_moderation() -> None:
     ]
     reason = "Primary mark: 1 quoted excerpt was not found on the cited page"
     assert moderation_reasons(primary, audit, [], False, False, unverified_quote_reasons=[reason]) == [reason]
+
+
+def test_audit_recommendation_parsing_tolerates_common_phrasings() -> None:
+    primary = _complete_report(4)
+    consistent = [
+        "- **Audited mark recommendation:** 4/6 — supported (Page 2).",
+        "- **Audited mark recommendation:** **4/6** — supported.",
+        "- **Audited mark recommendation:** Keep 4/6 — supported.",
+        "- **Audited mark recommendation:** Confirm 4/6.",
+        "- **Audited mark recommendation:** 4 out of 6.",
+        "- **Audited mark recommendation**: 4/6",
+        "- Audited mark recommendation: agree with the primary mark of 4/6.",
+        "- **Audited mark recommendation:** 4/6 rather than 5/6, because Page 3 lacks controls.",
+    ]
+    for line in consistent:
+        audit = _complete_report(4, "no").replace(
+            "- **Audited mark recommendation:** 4/6 — supported.", line, 1
+        )
+        assert audit_mark_issues(primary, audit) == [], line
+
+    raised = _complete_report(4, "no").replace(
+        "- **Audited mark recommendation:** 4/6 — supported.",
+        "- **Audited mark recommendation:** raise from 4/6 to 5/6 (Page 3).",
+        1,
+    )
+    # The heading copied the primary mark but the body recommends 5/6: still caught.
+    assert audit_mark_issues(primary, raised) == ["Research design: audit heading 4/6 but recommendation 5/6"]
+
+
+def test_verdicts_accept_colon_outside_bold() -> None:
+    assert not audit_requests_review("- **Escalation required**: no — marks confirmed")
+    assert audit_requests_review("- **Escalation required**: **Yes** — Page 2 unclear")
+    assert not report_requests_human_review("- **Human review recommended**: no — clear evidence")
+    assert human_review_reason("- **Human review recommended**: **yes** — Page 4 illegible") == "Page 4 illegible"
+    flagged = require_human_review("- **Human review recommended**: no — fine\n\n## Body", "suspected injection")
+    assert flagged.startswith("- **Human review recommended:** yes — suspected injection")
