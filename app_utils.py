@@ -79,7 +79,7 @@ def redact_injection_spans(text: str, matches: list[dict[str, object]]) -> str:
 def require_human_review(report: str, reason: str) -> str:
     """Apply a deterministic review flag to a model report after validation."""
     review_line = f"- **Human review recommended:** yes — {reason}"
-    pattern = r"(?im)^-\s*\*{0,2}Human review recommended:\*{0,2}\s*(?:yes|no)\b[^\n]*"
+    pattern = r"(?im)^-\s*" + _label("Human review recommended") + r"(?:yes|no)\b[^\n]*"
     if re.search(pattern, report):
         return re.sub(pattern, lambda _: review_line, report, count=1)
     return f"## Mandatory human review\n{review_line}\n\n{report}"
@@ -317,14 +317,19 @@ def report_page_issues(report: str, page_count: int) -> list[str]:
     return [f"Citations refer to pages outside this PDF: {', '.join(map(str, invalid))}."] if invalid else []
 
 
+def _label(label: str) -> str:
+    """Regex for a report label, with the colon inside or outside Markdown bold."""
+    return rf"\*{{0,2}}{re.escape(label)}(?::\*{{0,2}}|\*{{0,2}}\s*:)\s*\*{{0,2}}\s*"
+
+
 def audit_requests_review(report: str) -> bool:
     """An absent or ambiguous audit verdict is treated as needing moderation."""
-    verdict = re.search(r"\*{0,2}Escalation required:\*{0,2}\s*(yes|no)\b", report, re.IGNORECASE)
+    verdict = re.search(_label("Escalation required") + r"(yes|no)\b", report, re.IGNORECASE)
     return verdict is None or verdict.group(1).lower() == "yes"
 
 
 HUMAN_REVIEW_PATTERN = re.compile(
-    r"\*{0,2}Human review recommended:\*{0,2}\s*(yes|no)\b[\s—–:-]*([^\n]*)",
+    _label("Human review recommended") + r"(yes|no)\b\**[\s—–:-]*([^\n]*)",
     flags=re.IGNORECASE,
 )
 
@@ -353,13 +358,23 @@ def _criterion_section(report: str, criterion: str) -> str | None:
     return match.group("body") if match else None
 
 
+MARK_OUT_OF_SIX = r"(?<![\d.])([0-6])\s*(?:/|out of)\s*6\b"
+
+
 def _labelled_mark(section: str, label: str) -> int | None:
-    match = re.search(
-        rf"\*{{0,2}}{re.escape(label)}:\*{{0,2}}\s*\*{{0,2}}([0-6])\s*/\s*6\b",
-        section,
-        flags=re.IGNORECASE,
-    )
-    return int(match.group(1)) if match else None
+    """Read the mark on a labelled line, e.g. "Keep 4/6" or "Raise from 4/6 to 5/6".
+
+    A mark after "to"/"→" is the recommendation; otherwise the first mark on the line is.
+    """
+    line = re.search(_label(label) + r"(?P<rest>[^\n]*)", section, flags=re.IGNORECASE)
+    if not line:
+        return None
+    rest = line.group("rest")
+    target = re.search(r"(?:\bto\b|→|->)\s*\**\s*" + MARK_OUT_OF_SIX, rest, flags=re.IGNORECASE)
+    if target:
+        return int(target.group(1))
+    first = re.search(MARK_OUT_OF_SIX, rest, flags=re.IGNORECASE)
+    return int(first.group(1)) if first else None
 
 
 def audit_mark_issues(primary_report: str, audit_report: str) -> list[str]:
@@ -597,11 +612,6 @@ def build_evaluation_record(
     usage_log: list[dict[str, object]],
 ) -> dict[str, object]:
     """Export marks and run metadata without the student's IA or report text."""
-    review = re.search(
-        r"\*{0,2}Human review recommended:\*{0,2}\s*(yes|no)\b",
-        final_report,
-        flags=re.IGNORECASE,
-    )
     return {
         "case_id": case_id,
         "pipeline": "evidence_audit_v1",
@@ -611,7 +621,7 @@ def build_evaluation_record(
         "marks": extract_report_scores(final_report),
         "decision_mode": decision_mode,
         "escalation_reasons": escalation_reasons,
-        "review_recommended": review is None or review.group(1).lower() == "yes",
+        "review_recommended": report_requests_human_review(final_report),
         "api_input_tokens": sum(int(entry.get("input_tokens") or 0) for entry in usage_log),
         "api_output_tokens": sum(int(entry.get("output_tokens") or 0) for entry in usage_log),
         "api_seconds": round(sum(float(entry.get("seconds") or 0) for entry in usage_log), 2),
