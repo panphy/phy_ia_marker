@@ -78,7 +78,8 @@ precise communication required by a descriptor. Do not assess manipulative skill
   **CHUNK 2 | Pages 3–5**.
 - Cite a figure/table/section label only if that label appears verbatim in the extracted IA.
 - If extraction is incomplete, say **“not evidenced in the extracted IA”**, not “absent”.
-- Keep quotations short. Never fabricate a value, label, calculation or source.
+- Keep quotations short and put only verbatim IA text, from the cited page, inside quotation marks.
+  Never fabricate a value, label, calculation or source.
 - Keep visual hints separate and label them **Visual hint (unverified, uncited)**. Cite an
   original attached visual as Page N only when directly inspected and legible.
 {digest_citation_guidance}

@@ -63,6 +63,7 @@ When an image or calculation cannot be verified, say **"not evidenced in the ava
 and recommend human review if it could change a mark.
 
 Every material final-mark claim needs **Page N**, **Pages N–M**, or an exact digest page label.
+Put only verbatim IA text, from the cited page, inside quotation marks.
 Never invent a value, source location or figure label. Keep visual-analysis hints separate.
 {digest_citation_guidance}
 
@@ -70,7 +71,7 @@ Never invent a value, source location or figure label. Keep visual-analysis hint
 Return only Markdown in this structure:
 
 ## Final decision
-- **Total:** X/24
+- **Total:** X/24 (must equal the sum of the four final criterion marks)
 - **Human review recommended:** yes/no — reason
 - **Overall rationale:** one concise paragraph
 

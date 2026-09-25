@@ -12,7 +12,9 @@ from pdf_utils import (
     PdfPasswordRequiredError,
     SourceImage,
     attach_unambiguous_captions,
+    available_ocr_languages,
     ocr_pdf_page,
+    pdf_requires_password,
     prepare_source_images,
     render_pdf_page_image,
     screen_source_images,
@@ -71,6 +73,29 @@ def test_extract_pdf_text_requires_password_for_encrypted_pdf() -> None:
 
     with pytest.raises(PdfPasswordRequiredError):
         extract_pdf_text(encrypted_pdf, use_ocr=False, ocr_language="eng")
+
+
+def test_pdf_requires_password_detects_user_password() -> None:
+    assert pdf_requires_password(build_encrypted_pdf("secret")) is True
+    assert pdf_requires_password(build_encrypted_pdf("")) is False
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    assert pdf_requires_password(buffer.getvalue()) is False
+    assert pdf_requires_password(b"not a pdf") is False
+
+
+def test_available_ocr_languages_lists_english_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("pdf_utils.pytesseract.get_languages", lambda config="": ["osd", "fra", "eng"])
+    assert available_ocr_languages() == ["eng", "fra"]
+
+    def missing(config: str = "") -> list[str]:
+        raise OSError("tesseract not installed")
+
+    monkeypatch.setattr("pdf_utils.pytesseract.get_languages", missing)
+    assert available_ocr_languages() == ["eng"]
 
 
 def test_extract_pdf_text_rejects_wrong_password_for_encrypted_pdf() -> None:

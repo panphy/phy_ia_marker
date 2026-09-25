@@ -22,7 +22,8 @@ Modern Streamlit workspace for reviewing IB DP Physics scientific investigations
 - `prompts/` — prompt templates for the primary marker, evidence auditor and moderator.
 - `eval_marking.py` — compare exported scoring records with qualified human marks.
 - `tests/` — unit tests for prompt QA and PDF extraction utilities.
-- `tasks.md` — roadmap and follow-up tasks.
+- `todo.md` — follow-up tasks for the marking pipeline and UI.
+- `tasks.md` — PDF extraction roadmap.
 - `AGENTS.md` — concise contributor guidance and marking safeguards; `CLAUDE.md` points to it.
 
 ## Development
@@ -40,14 +41,15 @@ Install `requirements.txt`, then run `streamlit run app.py` or `pytest tests/`. 
 ## Configuration notes
 - **Models**: marking and visual analysis use `gpt-6-sol` through the Responses API.
 - **Reasoning**: marking and adjudication use high reasoning effort; evidence-preserving digest work uses low effort.
-- **OCR**: toggle in the sidebar; set OCR language via the text input.
+- **OCR**: toggle in the sidebar; choose an installed Tesseract language under **Advanced**.
 - **Digesting**: large PDFs are summarized into a structured digest before marking. The digest
   preserves key evidence (numbers, units, uncertainties, figures/tables) and keeps page-range
   labels so citations can still reference where evidence came from.
 - **Visual analysis**: vector graphics are rasterized per page. Optional extra vision summaries are off by default; selected original visuals still go directly to marking calls.
 - **Storage**: `STORE_RESPONSES` is `False` by default for privacy.
 - **Password throttle**: the app shares a 5-minute cooldown across browser sessions in one server process after five failed attempts. Deployments with multiple worker processes need an external shared rate limiter.
-- **Encrypted PDFs**: supply a PDF password in the sidebar if needed.
+- **Encrypted PDFs**: a password field appears below the upload box when the PDF needs one.
+- **Theme**: colours live in `.streamlit/config.toml` and the matching CSS tokens at the top of the UI section in `app.py`; keep them in sync.
 
 ## How marking works
 1. The PDF is parsed page-by-page. OCR is attempted on pages with no selectable text and on image-heavy pages with only a short selectable header (if enabled).
@@ -55,8 +57,10 @@ Install `requirements.txt`, then run `streamlit run app.py` or `pytest tests/`. 
    context. The digest keeps page-range labels so evidence can still be cited.
 3. The app builds a page index and exact candidate excerpts for rubric areas; these are navigation aids, not verified claims. A primary marker applies all four criteria and cites original pages.
 4. An evidence auditor checks the primary claims against the IA and attached original visuals.
-5. Exact agreement with no evidence warning is finalized after audit. A mark difference, audit concern or coverage gap goes to the Chief Moderator.
-6. Suspected instructions aimed at the marker, or selected visuals that cannot be screened, prevent automatic sign-off. The app shows provisional marks and requires a teacher to inspect the original PDF.
+5. The app checks the reports without a model: the audit's heading mark must match its recommendation and its copy of the primary mark; stated totals must equal the criterion marks; and short quotes must appear in the extracted text of the cited page (image-only pages and rubric wording are skipped).
+6. Exact agreement with no evidence warning is finalized after audit, keeping any auditor note on overstated claims. A mark difference, audit concern, coverage gap, unverified quote, or use of a summarized IA goes to the Chief Moderator.
+7. If the Chief Moderator recommends human review, or quotes text that is not on the cited page, the app shows the marks as provisional and asks for teacher review.
+8. Suspected instructions aimed at the marker, or selected visuals that cannot be screened, prevent automatic sign-off. The app shows provisional marks and requires a teacher to inspect the original PDF.
 
 ## Rubric currency
 The bundled rubric is sourced from the *Physics guide* (February 2023, updated November 2024), first assessment 2025. The IB's 2026 Physics examiner instructions continue to use the same four criteria and 24-mark structure. Current-session application notes are recorded in `criteria/ib_phy_ia_criteria.md`.
@@ -80,10 +84,10 @@ The **Technical details** panel can download a scoring record containing marks, 
 
 ## Troubleshooting
 - **No extractable text**: enable OCR or verify your PDF isn’t image-only.
-- **OCR errors**: confirm Tesseract is installed and the language code exists.
+- **OCR errors**: confirm Tesseract and the selected language data are installed.
 - **PDF rendering errors**: check that the PDF opens normally and its password is correct; Poppler is not required.
 - **Rate limits/timeouts**: retry after a short delay.
-- **Encrypted PDFs**: provide the password in the sidebar if prompted.
+- **Encrypted PDFs**: enter the password in the field below the upload box.
 
 ## Visual coverage roadmap
 To avoid unfair marks when PDFs contain photos, diagrams, graphs, or tables, see `tasks.md` for the planned extraction and visual-understanding upgrades that will surface unread content explicitly.

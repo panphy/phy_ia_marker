@@ -23,14 +23,17 @@ from app_utils import (
     build_model_input,
     chunk_pages,
     extract_report_scores,
+    human_review_reason,
     moderation_reasons,
     redact_injection_spans,
     require_human_review,
     report_page_issues,
+    report_requests_human_review,
     report_validation_issues,
     sample_evenly,
     scan_injection_phrases,
     split_pages,
+    unverified_quotes,
 )
 from pdf_utils import (
     ExtractedVisual,
@@ -39,7 +42,9 @@ from pdf_utils import (
     PdfPasswordRequiredError,
     SourceImage,
     attach_unambiguous_captions,
+    available_ocr_languages,
     extract_pdf_text,
+    pdf_requires_password,
     prepare_source_images,
     screen_source_images,
 )
@@ -834,67 +839,120 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    :root { --ink: #182033; --muted: #667085; --violet: #6941c6; --cyan: #0e9384; }
-    [data-testid="stAppViewContainer"] {
-        background:
-            radial-gradient(circle at 8% 0%, rgba(105,65,198,.08), transparent 30rem),
-            radial-gradient(circle at 92% 4%, rgba(14,147,132,.07), transparent 28rem),
-            #f7f8fc;
+    /* Palette tokens: keep in sync with .streamlit/config.toml. */
+    :root {
+        --paper: #faf7f0;
+        --surface: #ffffff;
+        --surface-muted: #f3eee4;
+        --ink: #1f1e1b;
+        --ink-soft: #3a3833;
+        --muted: #6b665c;
+        --line: #e7e1d4;
+        --accent: #b8432f;
+        --accent-hover: #963522;
+        --accent-soft: #f7e9e4;
+        --success: #3a7d44;
+        --success-soft: #eaf3ea;
+        --warning: #b7791f;
+        --error: #9f1d35;
     }
-    [data-testid="stHeader"] {
-        background: rgba(255,255,255,.98);
-        border-bottom: 1px solid #e4e7ec;
-        box-shadow: 0 2px 12px rgba(16,24,40,.08);
+    [data-testid="stAppViewContainer"] { background: var(--paper); }
+    [data-testid="stHeader"] { background: transparent; }
+    [data-testid="stSidebar"] { border-right: 1px solid var(--line); }
+    .block-container { max-width: 1180px; padding-top: 1.6rem; padding-bottom: 4rem; }
+    h1, h2, h3 { color: var(--ink); letter-spacing: -.015em; }
+    [data-testid="stMarkdownContainer"] h3 { font-size: 1.2rem; }
+    .app-header {
+        display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+        padding: .85rem 1.1rem;
+        margin: .4rem 0 1.4rem;
+        background: var(--ink);
+        border-bottom: 3px solid var(--accent);
+        border-radius: 14px;
+        color: var(--paper);
     }
-    [data-testid="stSidebar"] { background: #ffffff; border-right: 1px solid #eaecf0; }
-    .block-container { max-width: 1240px; padding-top: 2.2rem; padding-bottom: 4rem; }
-    h1, h2, h3 { color: var(--ink); letter-spacing: -.02em; }
-    .hero {
-        padding: 1.9rem 2rem 1.7rem;
-        border: 1px solid rgba(105,65,198,.14);
-        border-radius: 24px;
-        color: white;
-        background: linear-gradient(125deg, #24124f 0%, #51309a 58%, #087f74 130%);
-        box-shadow: 0 18px 45px rgba(36,18,79,.15);
-        margin: 1.5rem 0 1.4rem;
+    .app-header img { width: 44px; height: 44px; border-radius: 8px; flex: none; }
+    .app-header-title { flex: 1 1 auto; min-width: 12rem; }
+    .app-header-kicker { font-size: .68rem; font-weight: 700; letter-spacing: .14em; opacity: .7; }
+    .app-header h1 { color: var(--paper); font-size: 1.45rem; line-height: 1.2; margin: 0; padding: 0; }
+    .app-header-meta { display: flex; flex-wrap: wrap; gap: .4rem; }
+    .app-pill {
+        padding: .28rem .6rem; border-radius: 999px; font-size: .74rem;
+        border: 1px solid rgba(250,247,240,.28); color: rgba(250,247,240,.9);
     }
-    .hero-kicker { font-size: .77rem; font-weight: 700; letter-spacing: .12em; opacity: .78; }
-    .hero h1 { color: white; font-size: clamp(2rem, 4vw, 3.35rem); margin: .42rem 0 .5rem; }
-    .hero p { max-width: 760px; font-size: 1.04rem; line-height: 1.6; opacity: .9; margin: 0; }
-    .hero-meta { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: 1.15rem; }
-    .hero-pill { padding: .38rem .7rem; border-radius: 999px; background: rgba(255,255,255,.12); font-size: .78rem; }
-    .section-label { color: #6941c6; font-size: .75rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
-    .step-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: .65rem; margin: .2rem 0 1.4rem; }
-    .step { background: rgba(255,255,255,.75); border: 1px solid #eaecf0; border-radius: 14px; padding: .8rem .9rem; color: #667085; font-size: .84rem; }
-    .step strong { display: block; color: #344054; margin-bottom: .1rem; }
-    .step.active { border-color: #9e77ed; background: #f4f0ff; }
-    .step.done { border-color: #6ce9a6; background: #ecfdf3; }
-    [data-testid="stVerticalBlockBorderWrapper"] { border-radius: 18px; border-color: #e4e7ec; background: rgba(255,255,255,.78); }
-    [data-testid="stFileUploaderDropzone"] { border: 1.5px dashed #9e77ed; border-radius: 16px; background: #faf9ff; }
-    .stButton > button, .stDownloadButton > button { min-height: 2.85rem; border-radius: 12px; font-weight: 650; }
+    .section-label {
+        color: var(--accent); font-size: .72rem; font-weight: 800;
+        letter-spacing: .12em; text-transform: uppercase; margin-bottom: .35rem;
+    }
+    .step-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: .6rem; margin: .4rem 0 1.2rem; }
+    .step {
+        display: flex; gap: .6rem; align-items: center;
+        background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+        padding: .65rem .8rem; color: var(--muted); font-size: .8rem;
+    }
+    .step-dot {
+        flex: none; display: grid; place-items: center; width: 1.6rem; height: 1.6rem;
+        border-radius: 999px; border: 1.5px solid var(--line); font-weight: 700; color: var(--muted);
+    }
+    .step strong { display: block; color: var(--ink-soft); font-size: .86rem; }
+    .step.active { border-color: var(--accent); background: var(--accent-soft); }
+    .step.active .step-dot { border-color: var(--accent); color: var(--accent); }
+    .step.running .step-dot { animation: step-pulse 1.4s ease-in-out infinite; }
+    .step.done { border-color: #b9d6bc; background: var(--success-soft); }
+    .step.done .step-dot { border-color: var(--success); background: var(--success); color: #fff; }
+    @keyframes step-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(184,67,47,.35); } 50% { box-shadow: 0 0 0 .3rem rgba(184,67,47,0); } }
+    .st-key-login_card, .st-key-upload_card, .st-key-flow_card { border-radius: 14px; background: var(--surface); }
+    [data-testid="stFileUploaderDropzone"] {
+        border: 1.5px dashed #d8b7ab; border-radius: 12px; background: #fdf9f6;
+    }
+    .stButton > button, .stDownloadButton > button { min-height: 2.75rem; border-radius: 10px; font-weight: 650; }
     .stButton button[data-testid="stBaseButton-primary"],
     .stFormSubmitButton button {
-        color: #fff; border: 0; background: linear-gradient(100deg, #6941c6, #7f56d9);
-        box-shadow: 0 7px 18px rgba(105,65,198,.22);
+        color: #fff; border: 0; background: var(--accent);
+        box-shadow: 0 4px 12px rgba(184,67,47,.22);
     }
     .stButton button[data-testid="stBaseButton-primary"]:hover,
-    .stFormSubmitButton button:hover { color: #fff; background: linear-gradient(100deg, #53389e, #6941c6); }
-    [data-testid="stMetric"] { background: #fff; border: 1px solid #eaecf0; border-radius: 14px; padding: .8rem 1rem; }
-    .privacy-note { color: #475467; font-size: .82rem; line-height: 1.45; padding: .8rem; background: #f2f4f7; border-radius: 12px; }
+    .stFormSubmitButton button:hover { color: #fff; background: var(--accent-hover); }
+    .stButton button[data-testid="stBaseButton-primary"]:disabled {
+        color: var(--muted); background: var(--surface-muted); box-shadow: none;
+    }
+    [data-testid="stMetric"] { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: .6rem .9rem; }
+    .flow-list { margin: 0; padding: 0; list-style: none; font-size: .88rem; color: var(--ink-soft); }
+    .flow-list li { display: flex; gap: .6rem; padding: .45rem 0; border-bottom: 1px solid var(--line); }
+    .flow-list li:last-child { border-bottom: 0; }
+    .flow-list b { flex: none; color: var(--accent); }
+    .score-total {
+        padding: 1rem 1.2rem; border-radius: 14px; background: var(--ink); color: var(--paper);
+        min-height: 8.4rem; display: flex; flex-direction: column; justify-content: center;
+    }
+    .score-total span { display: block; font-size: .74rem; letter-spacing: .1em; text-transform: uppercase; opacity: .75; }
+    .score-total div { font-size: 2.4rem; font-weight: 700; line-height: 1.1; }
+    .score-total small { font-size: 1.1rem; font-weight: 400; opacity: .7; }
+    .score-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .6rem; }
+    .score-card { padding: .7rem .9rem; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
+    .score-card-head { display: flex; justify-content: space-between; font-size: .85rem; color: var(--ink-soft); }
+    .score-card-head strong { color: var(--ink); }
+    .score-bar { height: .4rem; margin-top: .5rem; border-radius: 999px; background: var(--surface-muted); overflow: hidden; }
+    .score-bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+    .privacy-note {
+        color: var(--muted); font-size: .8rem; line-height: 1.45; padding: .75rem .8rem;
+        background: var(--surface-muted); border-radius: 10px; margin-top: .6rem;
+    }
+    .privacy-note strong { color: var(--ink-soft); }
     div[role="dialog"]:has(.marking-dialog-content) {
-        border: 1px solid rgba(105,65,198,.18);
-        border-radius: 22px;
-        box-shadow: 0 24px 70px rgba(36,18,79,.22);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: 0 24px 60px rgba(31,30,27,.22);
     }
     .marking-dialog-content { text-align: center; padding: .35rem .25rem .6rem; }
-    .marking-dialog-content p { color: #475467; line-height: 1.5; margin: .15rem auto .35rem; }
-    .marking-dialog-content small { color: #667085; }
+    .marking-dialog-content p { color: var(--ink-soft); line-height: 1.5; margin: .15rem auto .35rem; }
+    .marking-dialog-content small { color: var(--muted); }
     .marking-dots { display: flex; justify-content: center; gap: .42rem; margin: .2rem 0 1.1rem; }
     .marking-dots span {
         width: .62rem;
         height: .62rem;
         border-radius: 999px;
-        background: linear-gradient(135deg, #6941c6, #0e9384);
+        background: var(--accent);
         animation: marking-dot-pulse 1.35s ease-in-out infinite;
     }
     .marking-dots span:nth-child(2) { animation-delay: .16s; }
@@ -903,24 +961,31 @@ st.markdown(
         0%, 70%, 100% { opacity: .32; transform: translateY(0) scale(.82); }
         35% { opacity: 1; transform: translateY(-.28rem) scale(1); }
     }
-    @media (prefers-reduced-motion: reduce) { .marking-dots span { animation: none; opacity: .7; } }
-    @media (max-width: 760px) { .step-row { grid-template-columns: 1fr 1fr; } .hero { padding: 1.4rem; } }
+    @media (prefers-reduced-motion: reduce) {
+        .marking-dots span, .step.running .step-dot { animation: none; opacity: .7; }
+    }
+    @media (max-width: 760px) {
+        .step-row { grid-template-columns: 1fr 1fr; }
+        .app-header-meta { display: none; }
+        .score-grid { grid-template-columns: 1fr; }
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 st.markdown(
-    """
-    <div class="hero">
-      <div class="hero-kicker">PANPHY LABS · ASSESSMENT WORKSPACE</div>
-      <h1>Physics IA Review</h1>
-      <p>Evidence-led marking for the current IB DP Physics scientific investigation,
-      combining a rubric-based mark, an evidence audit and targeted moderation.</p>
-      <div class="hero-meta">
-        <span class="hero-pill">4 criteria · 24 marks</span>
-        <span class="hero-pill">OCR + visual coverage checks</span>
-        <span class="hero-pill">Responses not stored</span>
+    f"""
+    <div class="app-header">
+      <img src="{PANPHY_LOGO_DATA_URI}" alt="PanPhy logo" />
+      <div class="app-header-title">
+        <div class="app-header-kicker">PANPHY LABS · ASSESSMENT WORKSPACE</div>
+        <h1>Physics IA Review</h1>
+      </div>
+      <div class="app-header-meta">
+        <span class="app-pill">4 criteria · 24 marks</span>
+        <span class="app-pill">OCR + visual coverage checks</span>
+        <span class="app-pill">Responses not stored</span>
       </div>
     </div>
     """,
@@ -966,10 +1031,10 @@ def require_password() -> None:
 
         _, login_column, _ = st.columns([1, 1.15, 1])
         with login_column:
-            with st.container(border=True):
+            with st.container(border=True, key="login_card"):
                 st.markdown("### Welcome back")
                 st.caption("Enter the workspace password to continue.")
-                with st.form("password_form"):
+                with st.form("password_form", border=False):
                     password = st.text_input(
                         "Workspace password",
                         type="password",
@@ -1008,49 +1073,49 @@ if st.session_state.processing_error:
 if inputs_disabled:
     show_marking_overlay()
 
+@st.cache_data(show_spinner=False)
+def get_ocr_languages() -> list[str]:
+    return available_ocr_languages()
+
+
 with st.sidebar:
-    st.markdown(
-        f"""
-        <div style="display:flex;align-items:center;gap:.65rem;margin:.15rem 0 1.35rem">
-          <img src="{PANPHY_LOGO_DATA_URI}" alt="PanPhy logo"
-          style="width:40px;height:40px;border-radius:9px;object-fit:cover" />
-          <div style="font-weight:800;letter-spacing:.08em;color:#182033">PANPHY LABS</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown("### Assessment settings")
-    st.caption("Defaults are tuned for reliable, evidence-based marking.")
+    st.markdown("### Settings")
     model = DEFAULT_MODEL
-    st.markdown(f"**Marking model**  \n`{model}`")
-    st.caption("Rubric: first assessment 2025 · verified for 2026")
-    # NOTE: "Store API responses" toggle intentionally hidden from UI.
-    # Keep this in code so operators can re-enable it if needed.
-    # st.checkbox(
-    #     "Store API responses (OpenAI)",
-    #     value=STORE_RESPONSES,
-    #     disabled=True,
-    #     help="This app is set to store=false by default in code. Toggle in code if you want storage.",
-    # )
-    enable_ocr = st.toggle("Read scanned pages with OCR", value=True, disabled=inputs_disabled)
-    st.caption("Also checks image-heavy pages that contain only a short selectable header.")
-    ocr_language = st.text_input(
-        "OCR language code",
-        value="eng",
+    vision_model = DEFAULT_VISION_MODEL
+    enable_ocr = st.toggle(
+        "Read scanned pages with OCR",
+        value=True,
         disabled=inputs_disabled,
-        help="Tesseract language code, for example eng.",
+        help="Also checks image-heavy pages that contain only a short selectable header.",
     )
-    enable_visual_analysis = st.checkbox(
-        "Create extra visual summaries", value=False, disabled=inputs_disabled,
+    enable_visual_analysis = st.toggle(
+        "Create extra visual summaries",
+        value=False,
+        disabled=inputs_disabled,
         help="Optional extra model calls. Selected original visuals are supplied directly to the marker and auditor either way.",
     )
-    vision_model = DEFAULT_VISION_MODEL
-    pdf_password = st.text_input(
-        "PDF password",
-        type="password",
-        disabled=inputs_disabled,
-        help="Only needed for an encrypted PDF.",
-    )
+    with st.expander("Advanced"):
+        ocr_languages = get_ocr_languages()
+        ocr_language = st.selectbox(
+            "OCR language",
+            ocr_languages,
+            index=0,
+            disabled=inputs_disabled or not enable_ocr,
+            help="Tesseract languages installed on this server.",
+        )
+        # NOTE: "Store API responses" toggle intentionally hidden from UI.
+        # Keep this in code so operators can re-enable it if needed.
+        # st.checkbox(
+        #     "Store API responses (OpenAI)",
+        #     value=STORE_RESPONSES,
+        #     disabled=True,
+        #     help="This app is set to store=false by default in code. Toggle in code if you want storage.",
+        # )
+        st.markdown(
+            f"**Marking model** `{model}`  \n"
+            f"**Visual model** `{vision_model}`  \n"
+            "**Rubric** first assessment 2025 · verified for 2026"
+        )
     st.markdown(
         """
         <div class="privacy-note"><strong>Privacy</strong><br>
@@ -1059,7 +1124,6 @@ with st.sidebar:
         """,
         unsafe_allow_html=True,
     )
-    st.caption(f"Visual model: {DEFAULT_VISION_MODEL}")
 
 if "examiner1_report" not in st.session_state:
     st.session_state.examiner1_report = ""
@@ -1095,6 +1159,8 @@ if "ia_evidence_index" not in st.session_state:
     st.session_state.ia_evidence_index = ""
 if "ia_evidence_ledger" not in st.session_state:
     st.session_state.ia_evidence_ledger = ""
+if "ia_source_text" not in st.session_state:
+    st.session_state.ia_source_text = ""
 if "ia_visual_analysis" not in st.session_state:
     st.session_state.ia_visual_analysis = ""
 if "moderation_reasons" not in st.session_state:
@@ -1129,19 +1195,13 @@ def reset_reports() -> None:
     st.session_state.ia_caption_pages = []
     st.session_state.ia_evidence_index = ""
     st.session_state.ia_evidence_ledger = ""
+    st.session_state.ia_source_text = ""
     st.session_state.ia_visual_analysis = ""
     st.session_state.moderation_reasons = []
     st.session_state.decision_mode = ""
     st.session_state.usage_log = []
     st.session_state.pending_action = None
 
-
-current_settings_key = (enable_ocr, ocr_language, enable_visual_analysis, pdf_password)
-if st.session_state.last_settings_key is None:
-    st.session_state.last_settings_key = current_settings_key
-elif st.session_state.last_settings_key != current_settings_key:
-    reset_reports()
-    st.session_state.last_settings_key = current_settings_key
 
 
 def record_llm_error(context: str, error: LLMError) -> None:
@@ -1422,6 +1482,7 @@ def ensure_documents(
     st.session_state.ia_caption_pages = list(page_captions)
     st.session_state.ia_evidence_index = evidence_index
     st.session_state.ia_evidence_ledger = evidence_ledger
+    st.session_state.ia_source_text = ia_text
     st.session_state.ia_visual_analysis = visual_analysis_text
 
 
@@ -1479,6 +1540,30 @@ def run_evidence_audit(client: OpenAI, model: str, ia_ready: AIResult) -> str:
     return report
 
 
+def quote_check_findings(report: str, *earlier_reports: str) -> list[dict[str, object]]:
+    """Quoted excerpts in a report that are missing from the extracted text of the cited pages."""
+    if not report or not st.session_state.ia_source_text:
+        return []
+    page_texts = {
+        page_number: text.split("\n", 1)[-1]
+        for page_number, text in split_pages(st.session_state.ia_source_text)
+    }
+    reference = "\n".join(
+        [st.session_state.criteria_text, EXAMINER1_PROMPT, EXAMINER2_PROMPT, MODERATOR_PROMPT, *earlier_reports]
+    )
+    return unverified_quotes(report, page_texts, reference_text=reference)
+
+
+def quote_check_reason(label: str, findings: list[dict[str, object]]) -> list[str]:
+    if not findings:
+        return []
+    count = len(findings)
+    return [
+        f"{label}: {count} quoted excerpt{'s were' if count != 1 else ' was'} not found on the cited page"
+        f"{'s' if count != 1 else ''}"
+    ]
+
+
 def current_moderation_reasons() -> list[str]:
     visual_state = st.session_state.debug_info.get("visual_analysis", {})
     supplied_pages = {image.page_number for image in st.session_state.ia_source_images}
@@ -1495,6 +1580,14 @@ def current_moderation_reasons() -> list[str]:
         (bool(st.session_state.ia_extracted_visuals) and not bool(st.session_state.ia_source_images))
         or important_visual_missing,
         bool(st.session_state.ia_injection_findings or st.session_state.ia_visual_scan_failed_pages),
+        summary_used=st.session_state.ia_used_digest,
+        unverified_quote_reasons=(
+            quote_check_reason("Primary mark", quote_check_findings(st.session_state.examiner1_report))
+            + quote_check_reason(
+                "Evidence audit",
+                quote_check_findings(st.session_state.examiner2_report, st.session_state.examiner1_report),
+            )
+        ),
     )
 
 
@@ -1533,10 +1626,15 @@ def run_chief_moderation(client: OpenAI, model: str, ia_ready: AIResult, reasons
     return report
 
 
+@st.cache_data(show_spinner=False, max_entries=4)
+def upload_requires_password(file_bytes: bytes) -> bool:
+    return pdf_requires_password(file_bytes)
+
+
 st.markdown('<div class="section-label">New assessment</div>', unsafe_allow_html=True)
-workspace_left, workspace_right = st.columns([1.55, 1], gap="large")
+workspace_left, workspace_right = st.columns([1.55, 1], gap="medium")
 with workspace_left:
-    with st.container(border=True):
+    with st.container(border=True, key="upload_card"):
         st.markdown("### Add the student report")
         st.caption("Upload one PDF. Selectable text gives the strongest evidence trail; OCR handles scans.")
         ia_file = st.file_uploader(
@@ -1546,19 +1644,41 @@ with workspace_left:
             disabled=inputs_disabled,
             label_visibility="collapsed",
         )
+        ia_bytes = ia_file.getvalue() if ia_file else b""
+        needs_pdf_password = bool(ia_file) and upload_requires_password(ia_bytes)
+        pdf_password = ""
+        if needs_pdf_password:
+            pdf_password = st.text_input(
+                "This PDF is encrypted. Enter its password",
+                type="password",
+                key="pdf_password",
+                disabled=inputs_disabled,
+            )
+        run_full = st.button(
+            "Run complete assessment" if not st.session_state.moderator_report else "Run assessment again",
+            type="primary",
+            disabled=inputs_disabled or not ia_file or (needs_pdf_password and not pdf_password),
+            help="Extract evidence, mark the IA, audit the evidence, then moderate flagged cases.",
+            width="stretch",
+        )
+        st.caption("A complete run makes several model calls and may take a few minutes.")
 
 with workspace_right:
-    with st.container(border=True):
+    with st.container(border=True, key="flow_card"):
         st.markdown("### How the decision is made")
         st.markdown(
-            "**1 · Primary marker** applies the four rubric criteria  \n"
-            "**2 · Evidence auditor** checks claims, calculations and cited pages  \n"
-            "**3 · Chief Moderator** resolves disagreements or evidence gaps"
+            """
+            <ul class="flow-list">
+              <li><b>1</b><span><strong>Primary marker</strong> applies the four rubric criteria</span></li>
+              <li><b>2</b><span><strong>Evidence auditor</strong> checks claims, calculations and cited pages</span></li>
+              <li><b>3</b><span><strong>Chief Moderator</strong> resolves disagreements or evidence gaps</span></li>
+            </ul>
+            """,
+            unsafe_allow_html=True,
         )
-        st.caption("Exact agreement can be finalized after audit. Flagged cases are moderated; marks are never averaged.")
+        st.caption("Exact agreement can be finalized after audit. Marks are never averaged.")
 
 if ia_file:
-    ia_bytes = ia_file.getvalue()
     current_upload_key = (
         ia_file.name,
         hashlib.sha256(ia_bytes).hexdigest(),
@@ -1570,6 +1690,13 @@ elif st.session_state.last_upload_key is not None:
     reset_reports()
     st.session_state.last_upload_key = None
 
+current_settings_key = (enable_ocr, ocr_language, enable_visual_analysis, pdf_password)
+if st.session_state.last_settings_key is None:
+    st.session_state.last_settings_key = current_settings_key
+elif st.session_state.last_settings_key != current_settings_key:
+    reset_reports()
+    st.session_state.last_settings_key = current_settings_key
+
 primary_ready = not report_validation_issues(
     st.session_state.examiner1_report, st.session_state.ia_used_digest
 )
@@ -1579,47 +1706,48 @@ reports_ready = all(
 )
 
 step_states = [
-    ("1", "Upload", bool(ia_file)),
-    ("2", "Extract", bool(st.session_state.doc_cache_key)),
-    ("3", "Evidence audit", reports_ready),
-    ("4", "Final decision", bool(st.session_state.moderator_report.strip())),
+    ("Upload", bool(ia_file)),
+    ("Primary mark", primary_ready),
+    ("Evidence audit", reports_ready),
+    ("Final decision", bool(st.session_state.moderator_report.strip())),
 ]
+next_step = next((index for index, (_, done) in enumerate(step_states) if not done), None)
 step_html = []
-for number, label, done in step_states:
-    state_class = "done" if done else ("active" if not any(not item[2] for item in step_states[: int(number) - 1]) else "")
-    status = "Complete" if done else "Pending"
+for index, (label, done) in enumerate(step_states):
+    if done:
+        state_class, status, marker = "done", "Complete", "✓"
+    elif index == next_step:
+        running = st.session_state.is_processing and index > 0
+        state_class = "active running" if running else "active"
+        status = "In progress" if running else "Next"
+        marker = str(index + 1)
+    else:
+        state_class, status, marker = "", "Waiting", str(index + 1)
     step_html.append(
-        f'<div class="step {state_class}"><strong>{number} · {label}</strong>{status}</div>'
+        f'<div class="step {state_class}"><span class="step-dot">{marker}</span>'
+        f"<div><strong>{label}</strong>{status}</div></div>"
     )
 st.markdown(f'<div class="step-row">{"".join(step_html)}</div>', unsafe_allow_html=True)
 
-run_full = st.button(
-    "Run complete assessment" if not st.session_state.moderator_report else "Run assessment again",
-    type="primary",
-    disabled=inputs_disabled or not ia_file,
-    help="Extract evidence, mark the IA, audit the evidence, then moderate flagged cases.",
-    width="stretch",
-)
-st.caption("A complete run makes several model calls and may take a few minutes.")
-
 with st.expander("Advanced · run or repeat one stage"):
+    stage_disabled = inputs_disabled or not ia_file or (needs_pdf_password and not pdf_password)
     columns = st.columns(3, gap="small")
     with columns[0]:
         run_examiner1 = st.button(
             "Run primary mark",
-            disabled=inputs_disabled or not ia_file,
+            disabled=stage_disabled,
             width="stretch",
         )
     with columns[1]:
         run_examiner2 = st.button(
             "Run evidence audit",
-            disabled=inputs_disabled or not ia_file or not primary_ready,
+            disabled=stage_disabled or not primary_ready,
             width="stretch",
         )
     with columns[2]:
         run_moderator = st.button(
             "Run Chief Moderator",
-            disabled=inputs_disabled or not ia_file or not reports_ready,
+            disabled=stage_disabled or not reports_ready,
             width="stretch",
         )
 
@@ -1814,43 +1942,82 @@ if has_any_report:
         or st.session_state.examiner2_report
     )
     score_map = extract_report_scores(decision_report)
+    final_review_requested = bool(st.session_state.moderator_report) and report_requests_human_review(
+        st.session_state.moderator_report
+    )
+    final_quote_findings = (
+        quote_check_findings(
+            st.session_state.moderator_report,
+            st.session_state.examiner1_report,
+            st.session_state.examiner2_report,
+        )
+        if st.session_state.decision_mode == "moderated"
+        else []
+    )
     if len(score_map) == 4:
         total = sum(score_map.values())
-        metric_columns = st.columns(5, gap="small")
-        metric_columns[0].metric(
-            "Provisional total" if security_review_required else (
-                "Final total" if st.session_state.moderator_report else "Proposed total"
-            ),
-            f"{total}/24",
+        needs_teacher_check = security_review_required or final_review_requested or bool(final_quote_findings)
+        total_label = "Provisional total" if needs_teacher_check else (
+            "Final total" if st.session_state.moderator_report else "Proposed total"
         )
-        short_labels = {
-            "Research design": "Research design",
-            "Data analysis": "Data analysis",
-            "Conclusion": "Conclusion",
-            "Evaluation": "Evaluation",
-        }
-        for column, criterion in zip(metric_columns[1:], short_labels):
-            value = score_map.get(criterion)
-            column.metric(short_labels[criterion], f"{value}/6" if value is not None else "—")
+        criterion_cards = "".join(
+            f'<div class="score-card"><div class="score-card-head"><span>{criterion}</span>'
+            f"<strong>{value}/6</strong></div>"
+            f'<div class="score-bar"><i style="width:{round(value / 6 * 100)}%"></i></div></div>'
+            for criterion, value in (
+                (name, score_map[name])
+                for name in ("Research design", "Data analysis", "Conclusion", "Evaluation")
+            )
+        )
+        total_column, criteria_column = st.columns([1, 2.4], gap="small")
+        total_column.markdown(
+            f'<div class="score-total"><span>{total_label}</span>'
+            f"<div>{total}<small> / 24</small></div></div>",
+            unsafe_allow_html=True,
+        )
+        criteria_column.markdown(f'<div class="score-grid">{criterion_cards}</div>', unsafe_allow_html=True)
     else:
         st.warning("The report does not contain all four criterion marks. The total is hidden until the report is complete.")
 
+    reasons_text = "; ".join(st.session_state.moderation_reasons)
     if st.session_state.moderator_report:
         if security_review_required:
-            st.error(
-                "Teacher review required before using these provisional marks. "
+            status_kind = "error"
+            status_message = (
+                "**Teacher review required before using these provisional marks.** "
                 "The IA contained a possible marker-directed instruction or a visual that could not be screened."
             )
+        elif final_review_requested:
+            status_kind = "warning"
+            reason = human_review_reason(st.session_state.moderator_report) or "the report gave no clear verdict"
+            status_message = f"**Teacher review recommended before using these marks.** {reason[:1].upper()}{reason[1:]}."
         elif st.session_state.decision_mode == "moderated":
-            st.success("Final decision ready · the flagged issues were reviewed by the Chief Moderator.")
+            status_kind = "success"
+            status_message = "**Final decision ready.** The flagged issues were reviewed by the Chief Moderator."
         else:
-            st.success("Final decision ready · the evidence audit confirmed all four marks.")
-        st.caption("Review the cited pages in the original IA before using this mark.")
+            status_kind = "success"
+            status_message = "**Final decision ready.** The evidence audit confirmed all four marks."
+        if final_quote_findings:
+            if status_kind == "success":
+                status_kind = "warning"
+            listed = "; ".join(
+                f"“{str(item['quote'])[:120]}” (page {', '.join(map(str, item['pages']))})"
+                for item in final_quote_findings[:5]
+            )
+            status_message += (
+                f"  \n{len(final_quote_findings)} quoted excerpt(s) in the final decision were not found "
+                f"in the extracted text of the cited pages. Check them before use: {listed}"
+            )
+        if reasons_text:
+            status_message += f"  \nReview triggers: {reasons_text}"
+        status_message += "  \nReview the cited pages in the original IA before using this mark."
+    elif reasons_text:
+        status_kind = "warning"
+        status_message = f"**Moderator review needed.** {reasons_text}"
     else:
-        st.info("Review in progress · complete the evidence audit before using the marks.")
-    if st.session_state.moderation_reasons:
-        label = "Review triggers: " if st.session_state.moderator_report else "Moderator review needed: "
-        st.warning(label + "; ".join(st.session_state.moderation_reasons))
+        status_kind = "info"
+        status_message = "**Review in progress.** Complete the evidence audit before using the marks."
+    getattr(st, status_kind)(status_message)
 
     combined_report = build_combined_report(
         st.session_state.examiner1_report,
@@ -1921,8 +2088,16 @@ if has_any_report:
                 )
             else:
                 st.success("No material extraction warnings were detected.")
-            st.code(st.session_state.ia_coverage_report, language=None)
-            st.code(st.session_state.ia_evidence_index, language=None)
+            diagnostics = st.session_state.ia_page_diagnostics
+            summary_columns = st.columns(4, gap="small")
+            summary_columns[0].metric("Pages", len(diagnostics))
+            summary_columns[1].metric("Pages with OCR", sum(diag.used_ocr for diag in diagnostics))
+            summary_columns[2].metric("Visuals detected", len(st.session_state.ia_extracted_visuals))
+            summary_columns[3].metric("Visuals supplied", len(st.session_state.ia_source_images))
+            with st.expander("Coverage report"):
+                st.code(st.session_state.ia_coverage_report, language=None)
+            with st.expander("Evidence index"):
+                st.code(st.session_state.ia_evidence_index, language=None)
             with st.expander("Page-linked candidate evidence"):
                 st.caption("Exact excerpts for navigation; check each claim against the full PDF page.")
                 st.code(st.session_state.ia_evidence_ledger, language=None)

@@ -1,9 +1,24 @@
 [theme]
-primaryColor = "#6941C6"
-backgroundColor = "#F7F8FC"
-secondaryBackgroundColor = "#FFFFFF"
-textColor = "#182033"
+# "Lab notebook" palette, matched to the PanPhy logo (ink, paper, terracotta).
+# Keep in sync with the CSS tokens in app.py.
+base = "light"
+primaryColor = "#B8432F"
+backgroundColor = "#FAF7F0"
+secondaryBackgroundColor = "#F3EEE4"
+textColor = "#1F1E1B"
+linkColor = "#963522"
+borderColor = "#E7E1D4"
+codeBackgroundColor = "#F3EEE4"
+codeTextColor = "#963522"
 font = "sans-serif"
+baseRadius = "10px"
+
+[theme.sidebar]
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F6F2EA"
+
+[client]
+toolbarMode = "minimal"
 
 [browser]
 gatherUsageStats = false
