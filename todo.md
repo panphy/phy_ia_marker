@@ -28,20 +28,20 @@ every task here.
   and moderator comments. Export a scoring record for each run (the "Download scoring record" button,
   built by `build_evaluation_record` in `app_utils.py`), add `human_marks` and `human_review_required`,
   and save as JSONL outside the repo. Use these IAs as the regression set for every marking change.
-- **Files:** `eval_marking.py`, `app_utils.py` (`build_evaluation_record`).
-- **Add to the report:**
-  - accuracy of the primary mark, the audit mark and the final mark, each against the human marks
-    (records already hold `primary_marks` and `audit_marks`);
-  - escalation rate, split by `decision_mode`;
-  - how often each escalation reason fires. Group reason strings by prefix, because they contain marks.
-- **Done when:** `python eval_marking.py records.jsonl` prints per-stage exact / within-one / MAE figures
-  and escalation stats. Tests cover the new calculations using synthetic records only.
+- **Tooling: done (Sept 2026).** `python eval_marking.py records.jsonl` reports accuracy for each stage
+  (`stages.primary`, `stages.audit`, `stages.final`), `decision_modes`, `escalation_rate`, and
+  `escalation_reasons` grouped with marks and counts replaced by `#`. It's tested with synthetic records.
+- **Remaining (needs the user):** collect the IAs and human marks, run the report, and record the
+  baseline figures here.
+- **Done when:** baseline per-stage accuracy and escalation figures for the set are recorded here.
 
 ### [ ] 2. Measure run-to-run variance
 - **Why:** each stage is sampled once. Unstable marks are a hidden risk and could become an escalation
   signal.
-- **What:** add an offline script, or an `eval_marking.py` mode, that compares records from repeated runs
-  of the same `case_id` and reports the spread per criterion.
+- **Tooling: done (Sept 2026).** `python eval_marking.py --variance records.jsonl` groups repeated runs
+  by `case_id` and reports each criterion's mean spread and changed rate, plus total spread and
+  the share of cases where any mark changed. It needs no human marks.
+- **Remaining:** mark each evaluation IA at least twice, export the records, and run the report.
 - **Done when:** the spread per criterion is reported for the evaluation set. Record the baseline here.
 
 ### [ ] 3. Measure how often the quote check flags genuine quotes
