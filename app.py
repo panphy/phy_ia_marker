@@ -73,6 +73,7 @@ MAX_SOURCE_IMAGES = 6
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 PANPHY_LOGO_PATH = ASSETS_DIR / "panphy.png"
 PANPHY_FAVICON_PATH = ASSETS_DIR / "favicon.png"
+PANPHY_URL = "https://panphy.app"
 PANPHY_LOGO_DATA_URI = (
     "data:image/png;base64,"
     + base64.b64encode(PANPHY_LOGO_PATH.read_bytes()).decode("ascii")
@@ -871,7 +872,9 @@ st.markdown(
         border-radius: 14px;
         color: var(--paper);
     }
-    .app-header img { width: 44px; height: 44px; border-radius: 8px; flex: none; }
+    .app-header-logo { display: block; flex: none; border-radius: 8px; line-height: 0; }
+    .app-header-logo:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    .app-header img { width: 44px; height: 44px; border-radius: 8px; }
     .app-header-title { flex: 1 1 auto; min-width: 12rem; }
     .app-header-kicker { font-size: .68rem; font-weight: 700; letter-spacing: .14em; opacity: .7; }
     .app-header h1 { color: var(--paper); font-size: 1.45rem; line-height: 1.2; margin: 0; padding: 0; }
@@ -977,7 +980,8 @@ st.markdown(
 st.markdown(
     f"""
     <div class="app-header">
-      <img src="{PANPHY_LOGO_DATA_URI}" alt="PanPhy logo" />
+      <a class="app-header-logo" href="{PANPHY_URL}" target="_blank" rel="noopener noreferrer"
+         title="Visit panphy.app"><img src="{PANPHY_LOGO_DATA_URI}" alt="PanPhy home" /></a>
       <div class="app-header-title">
         <div class="app-header-kicker">PANPHY LABS · ASSESSMENT WORKSPACE</div>
         <h1>Physics IA Review</h1>
