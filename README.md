@@ -1,9 +1,9 @@
-# IB DP Physics IA Marker
+# IB DP Physics IA & EE Marker
 
-Modern Streamlit workspace for reviewing IB DP Physics scientific investigations (first assessment 2025 onward) against the current official rubric. It extracts page-linked evidence from a student PDF, proposes a mark, audits the evidence behind it, and moderates disputed or uncertain cases.
+Modern Streamlit workspace for reviewing IB DP Physics scientific investigations (IA, first assessment 2025 onward) and physics extended essays (EE, first assessment 2027) against their rubrics. The teacher selects IA or EE before marking. The app extracts page-linked evidence from a student PDF, proposes a mark, audits the evidence behind it, and moderates disputed or uncertain cases.
 
 ## Features
-- **Rubric-driven marking** for Research design, Data analysis, Conclusion, and Evaluation.
+- **Rubric-driven marking** for the IA (Research design, Data analysis, Conclusion, Evaluation; 24 marks) or the EE (Framework for the essay, Knowledge and understanding, Analysis and line of argument, Discussion and evaluation /8, Reflection /4; 30 marks).
 - **Evidence audit** checks the primary mark's claims, calculations, citations and rubric fit.
 - **Targeted moderation** for mark disagreements, audit concerns and source-coverage gaps; marks are never averaged.
 - **Deterministic report checks** (no model involved): criterion marks, page citations, stated totals, audit mark consistency, and quotes checked against the cited page.
@@ -21,8 +21,8 @@ Modern Streamlit workspace for reviewing IB DP Physics scientific investigations
 - `llm_utils.py` — OpenAI calls, digesting and visual analysis, kept free of Streamlit so they can be tested.
 - `app_utils.py` — prompt QA helpers, page chunking, report validation and parsing, moderation routing, quote checks, and scoring-record export.
 - `pdf_utils.py` — PDF parsing, encryption detection, page rendering (once per page), OCR, and visual extraction helpers.
-- `criteria/ib_phy_ia_criteria.md` — rubric content used in prompts.
-- `prompts/` — prompt templates for the primary marker, evidence auditor and moderator.
+- `criteria/ib_phy_ia_criteria.md` and `criteria/ib_phy_ee_criteria.md` — IA and EE rubric content used in prompts.
+- `prompts/` — prompt templates for the primary marker, evidence auditor and moderator (`examiner1/examiner2/moderator_prompt.md` for the IA, `ee_*_prompt.md` for the EE).
 - `eval_marking.py` — compare exported scoring records with qualified human marks.
 - `tests/` — unit tests for marking safeguards, report parsing, prompts, PDF extraction, and the model-calling helpers (with a fake client, never the real API).
 - `.streamlit/config.toml` — theme colours (kept in sync with the CSS tokens in `app.py`) and toolbar settings.
@@ -37,11 +37,12 @@ Install `requirements.txt`, then run `streamlit run app.py` or `pytest tests/`. 
 ## Usage
 1. Open the app in your browser and enter the workspace password.
 2. Optionally adjust the sidebar settings: OCR, extra visual summaries, and (under **Advanced**) the OCR language.
-3. Upload a student IA PDF. If it is encrypted, enter its password in the field that appears.
-4. Select **Run complete assessment**. The progress tracker shows each stage; **Advanced · run or repeat one stage** reruns a single stage.
-5. Read the results banner first. It says whether the decision is ready or needs teacher review, and why.
-6. Review the final decision, primary mark, evidence audit and the **Source evidence** tab (page counts, coverage report, evidence index and the original visuals).
-7. Download the final decision, the complete Markdown bundle, or (under **Technical details**) the scoring record for calibration.
+3. Choose **Internal assessment (IA)** or **Extended essay (EE)**. Marking stays disabled until one is selected; changing it clears earlier reports.
+4. Upload the student PDF. If it is encrypted, enter its password in the field that appears. For an EE, append the student's Reflection and Progress Form (RPF) to the same PDF so Reflection can be marked; without it Reflection is marked 0/4 and the result is flagged for teacher review.
+5. Select **Run complete assessment**. The progress tracker shows each stage; **Advanced · run or repeat one stage** reruns a single stage.
+6. Read the results banner first. It says whether the decision is ready or needs teacher review, and why.
+7. Review the final decision, primary mark, evidence audit and the **Source evidence** tab (page counts, coverage report, evidence index and the original visuals).
+8. Download the final decision, the complete Markdown bundle, or (under **Technical details**) the scoring record for calibration.
 
 ## Configuration notes
 - **Models**: marking and visual analysis use `gpt-6-sol` through the Responses API.
@@ -70,7 +71,9 @@ Install `requirements.txt`, then run `streamlit run app.py` or `pytest tests/`. 
 8. Suspected instructions aimed at the marker, or selected visuals that cannot be screened, prevent automatic sign-off. The app shows provisional marks and requires a teacher to inspect the original PDF.
 
 ## Rubric currency
-The bundled rubric is sourced from the *Physics guide* (February 2023, updated November 2024), first assessment 2025. The IB's 2026 Physics examiner instructions continue to use the same four criteria and 24-mark structure. Current-session application notes are recorded in `criteria/ib_phy_ia_criteria.md`.
+The bundled IA rubric is sourced from the *Physics guide* (February 2023, updated November 2024), first assessment 2025. The IB's 2026 Physics examiner instructions continue to use the same four criteria and 24-mark structure. Current-session application notes are recorded in `criteria/ib_phy_ia_criteria.md`.
+
+The EE rubric follows the *Extended essay guide* for first assessment 2027 (five criteria, 30 marks), which replaced the 34-mark model. **Its descriptors are currently a close paraphrase from secondary summaries, not the official text**, because the guide could not be downloaded when the option was added. Replace them with the verbatim guide wording before relying on EE marks (see `todo.md`). The EE prompts add physics-specific application notes and mark Reflection only from the RPF.
 
 ## How visuals are read and used
 1. **Visual extraction**: embedded raster images are extracted from the PDF. Vector graphics are detected and rasterized per page for vision analysis when possible.  
@@ -87,7 +90,7 @@ The bundled rubric is sourced from the *Physics guide* (February 2023, updated N
 
 ## Calibration against human marks
 
-The **Technical details** panel can download a scoring record containing marks, route, model usage and a PDF-derived case ID, without the student's PDF or report text. Add `human_marks` for each of the four criteria and optionally `human_review_required` (a Boolean) to each record. Save one JSON object per line in a JSONL file, then run `python eval_marking.py records.jsonl`. Keep the human marks blind to the app's result where possible. Each record carries a `pipeline` label, which changes whenever the marking flow changes, so results from different versions aren't mixed. The comparison reports criterion and total mark error, within-one-mark rates, human-review recall and average API usage. It also gives the same accuracy figures separately for the primary mark, the audit and the final decision (`stages`), how cases were decided (`decision_modes`), and how often each escalation reason fired. To check consistency, mark the same IAs more than once and run `python eval_marking.py --variance records.jsonl`, which reports how much each criterion's mark changes between runs and needs no human marks. Use the same IAs to compare this workflow with any previous or alternative pipeline; no quality claim should be inferred until such a set is evaluated. Building this set is the first item in `todo.md`, and later prompt changes depend on it.
+The **Technical details** panel can download a scoring record containing marks, route, model usage, the assessment type (`ia` or `ee`) and a PDF-derived case ID, without the student's PDF or report text. Add `human_marks` for each criterion of that assessment and optionally `human_review_required` (a Boolean) to each record. Save one JSON object per line in a JSONL file, then run `python eval_marking.py records.jsonl`. Keep the human marks blind to the app's result where possible. Each record carries a `pipeline` label (`evidence_audit_v1` for the IA, `ee_evidence_audit_v1` for the EE), which changes whenever the marking flow changes, so results from different versions or assessment types aren't mixed. The comparison reports criterion and total mark error, within-one-mark rates, human-review recall and average API usage. It also gives the same accuracy figures separately for the primary mark, the audit and the final decision (`stages`), how cases were decided (`decision_modes`), and how often each escalation reason fired. To check consistency, mark the same IAs more than once and run `python eval_marking.py --variance records.jsonl`, which reports how much each criterion's mark changes between runs and needs no human marks. Use the same IAs to compare this workflow with any previous or alternative pipeline; no quality claim should be inferred until such a set is evaluated. Building this set is the first item in `todo.md`, and later prompt changes depend on it.
 
 ## Troubleshooting
 - **No extractable text**: enable OCR or verify your PDF isn’t image-only.

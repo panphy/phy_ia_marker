@@ -6,20 +6,26 @@ import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
-CRITERIA = ("Research design", "Data analysis", "Conclusion", "Evaluation")
+from app_utils import ASSESSMENT_TYPES, IA
+
 # Scoring-record keys holding each stage's marks; "marks" is the final decision.
 STAGE_KEYS = {"primary": "primary_marks", "audit": "audit_marks", "final": "marks"}
 
 
 def _marks(record: dict, key: str) -> dict[str, int]:
+    case = record.get("case_id", "?")
+    assessment = ASSESSMENT_TYPES.get(str(record.get("assessment", IA.key)))
+    if assessment is None:
+        raise ValueError(f"{case}: unknown assessment {record.get('assessment')!r}")
     values = record.get(key)
-    if not isinstance(values, dict) or set(values) != set(CRITERIA):
-        raise ValueError(f"{record.get('case_id', '?')}: {key} must contain all four criteria")
-    if any(type(values[criterion]) is not int for criterion in CRITERIA):
-        raise ValueError(f"{record.get('case_id', '?')}: {key} marks must be integers")
-    marks = {criterion: values[criterion] for criterion in CRITERIA}
-    if any(mark < 0 or mark > 6 for mark in marks.values()):
-        raise ValueError(f"{record.get('case_id', '?')}: {key} marks must be from 0 to 6")
+    if not isinstance(values, dict) or set(values) != set(assessment.names):
+        raise ValueError(f"{case}: {key} must contain all {assessment.short_name} criteria")
+    if any(type(values[criterion]) is not int for criterion in assessment.names):
+        raise ValueError(f"{case}: {key} marks must be integers")
+    marks = {criterion: values[criterion] for criterion in assessment.names}
+    for criterion, maximum in assessment.criteria:
+        if not 0 <= marks[criterion] <= maximum:
+            raise ValueError(f"{case}: {key} {criterion} mark must be from 0 to {maximum}")
     return marks
 
 
@@ -34,7 +40,7 @@ def _optional_marks(record: dict, key: str) -> dict[str, int] | None:
 def _accuracy(pairs: list[tuple[dict[str, int], dict[str, int]]]) -> dict[str, object]:
     criterion_errors = {
         criterion: [abs(predicted[criterion] - human[criterion]) for predicted, human in pairs]
-        for criterion in CRITERIA
+        for criterion in pairs[0][1]
     }
     total_errors = [abs(sum(predicted.values()) - sum(human.values())) for predicted, human in pairs]
     return {
@@ -57,12 +63,15 @@ def _accuracy(pairs: list[tuple[dict[str, int], dict[str, int]]]) -> dict[str, o
 
 def reason_category(reason: str) -> str:
     """Group escalation reasons that differ only in their marks or counts."""
-    category = re.sub(r"(?<![/\d])\d+", "#", reason)  # keeps "/6" and "/24" denominators
+    category = re.sub(r"(?<![/\d])\d+", "#", reason)  # keeps "/6", "/24" and other denominators
     return re.sub(r"excerpts? (was|were)", "excerpt(s) was/were", category)
 
 
 def evaluate_records(records: list[dict]) -> dict[str, dict]:
-    """Calculate criterion and total errors for each pipeline in a human-labelled set."""
+    """Calculate criterion and total errors for each pipeline in a human-labelled set.
+
+    IA and EE records use different pipeline labels, so each group has one set of criteria.
+    """
     grouped: dict[str, list[dict]] = defaultdict(list)
     for record in records:
         grouped[str(record.get("pipeline", "unspecified"))].append(record)
@@ -142,9 +151,10 @@ def evaluate_variance(records: list[dict]) -> dict[str, dict]:
         if not repeated:
             results[pipeline] = {"cases": len(cases), "repeated_cases": 0}
             continue
+        criteria = list(repeated[0][0])
         spreads = {
             criterion: [max(run[criterion] for run in runs) - min(run[criterion] for run in runs) for runs in repeated]
-            for criterion in CRITERIA
+            for criterion in criteria
         }
         total_spreads = [
             max(sum(run.values()) for run in runs) - min(sum(run.values()) for run in runs)
@@ -164,7 +174,7 @@ def evaluate_variance(records: list[dict]) -> dict[str, dict]:
             "total_mean_spread": round(sum(total_spreads) / len(total_spreads), 3),
             "total_max_spread": max(total_spreads),
             "any_mark_changed_rate": round(
-                sum(any(spreads[criterion][index] for criterion in CRITERIA) for index in range(len(repeated)))
+                sum(any(spreads[criterion][index] for criterion in criteria) for index in range(len(repeated)))
                 / len(repeated),
                 3,
             ),
@@ -174,7 +184,7 @@ def evaluate_variance(records: list[dict]) -> dict[str, dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Compare IA scoring records with qualified human marks."
+        description="Compare IA or EE scoring records with qualified human marks."
     )
     parser.add_argument("records", type=Path, help="JSONL file with one scoring record per line")
     parser.add_argument(

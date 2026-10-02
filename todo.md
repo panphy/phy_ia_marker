@@ -137,6 +137,27 @@ or improves, and escalation stays reasonable. Record both results here, and bump
 
 ---
 
+## Extended essay (EE) option
+
+### [ ] 13. Replace the paraphrased EE descriptors with the official text  *(do first for the EE)*
+- **Why:** the EE option (Oct 2026) was added while `ibo.org` and other hosts were blocked by the
+  build environment's network policy. Criterion names, maxima (6/6/6/8/4 = 30) and markband
+  structure follow the *Extended essay guide* (first assessment 2027), but the descriptor wording
+  in `criteria/ib_phy_ee_criteria.md` was assembled from secondary summaries.
+- **What:** copy each criterion's question, strands, markband descriptors and glossary verbatim from
+  the guide, with page numbers, in the same layout as the IA rubric. Confirm the Reflection
+  markbands (currently 0 / 1–2 / 3–4), the word-limit rule, and the physics subject-specific
+  guidance. Change the "paraphrased" status line and the sidebar `rubric_note` for `EE` in
+  `app_utils.py`, and update `test_ee_rubric_and_prompts_name_every_criterion_with_its_maximum`.
+- **Done when:** the rubric file states the guide edition and pages, and contains no paraphrase.
+
+### [ ] 14. EE evaluation set
+- **What:** as task 1, but for physics EEs with qualified or IB-moderated marks (records have
+  `"assessment": "ee"` and pipeline `ee_evidence_audit_v1`; `eval_marking.py` handles both).
+  Include essays with and without an attached RPF. Phase 2 rules apply to the EE prompts.
+
+---
+
 ## Engineering (any time; no effect on marks)
 
 No open items. Add new engineering tasks here.

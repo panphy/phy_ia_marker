@@ -10,6 +10,9 @@ from openai import OpenAI
 from streamlit.errors import StreamlitSecretNotFoundError
 
 from app_utils import (
+    ASSESSMENT_TYPES,
+    IA,
+    AssessmentType,
     LoginThrottle,
     apply_prompt_qa,
     build_agreed_decision,
@@ -56,10 +59,10 @@ from pdf_utils import (
 # -------------------------
 # Config
 # -------------------------
-APP_TITLE = "IB DP Physics IA Marker"
+APP_TITLE = "IB DP Physics IA & EE Marker"
 DEFAULT_MODEL = "gpt-6-sol"
 DEFAULT_VISION_MODEL = "gpt-6-sol"
-CRITERIA_PATH = Path(__file__).resolve().parent / "criteria" / "ib_phy_ia_criteria.md"
+CRITERIA_DIR = Path(__file__).resolve().parent / "criteria"
 MAX_PASSWORD_ATTEMPTS = 5
 PASSWORD_ATTEMPT_WINDOW_SECONDS = 300
 OCR_CONFIDENCE_WARNING_THRESHOLD = 60.0
@@ -86,9 +89,16 @@ def load_prompt(filename: str) -> str:
     return apply_prompt_qa(prompt)
 
 
-EXAMINER1_PROMPT = load_prompt("examiner1_prompt.md")
-EXAMINER2_PROMPT = load_prompt("examiner2_prompt.md")
-MODERATOR_PROMPT = load_prompt("moderator_prompt.md")
+# Primary marker, evidence auditor and Chief Moderator prompts for each assessment type.
+PROMPTS = {
+    key: tuple(load_prompt(filename) for filename in assessment.prompt_files)
+    for key, assessment in ASSESSMENT_TYPES.items()
+}
+
+
+def current_assessment() -> AssessmentType:
+    """The assessment type the current reports were (or will be) produced for."""
+    return ASSESSMENT_TYPES[st.session_state.get("assessment_key") or IA.key]
 
 
 # -------------------------
@@ -141,7 +151,10 @@ def record_model_usage(response: object, model: str, stage: str, seconds: float)
 
 
 def require_valid_report(report: str, label: str, used_digest: bool, page_count: int) -> None:
-    issues = report_validation_issues(report, used_digest) + report_page_issues(report, page_count)
+    issues = (
+        report_validation_issues(report, used_digest, current_assessment())
+        + report_page_issues(report, page_count)
+    )
     if issues:
         raise LLMError(
             user_message=f"{label} needs another run: {' '.join(issues)}",
@@ -488,6 +501,7 @@ st.markdown(
     .score-total small { font-size: 1.1rem; font-weight: 400; opacity: .7; }
     .score-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .6rem; }
     .score-card { padding: .7rem .9rem; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
+    .score-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
     .score-card-head { display: flex; justify-content: space-between; font-size: .85rem; color: var(--ink-soft); }
     .score-card-head strong { color: var(--ink); }
     .score-bar { height: .4rem; margin-top: .5rem; border-radius: 999px; background: var(--surface-muted); overflow: hidden; }
@@ -539,10 +553,10 @@ st.markdown(
          title="Visit panphy.app"><img src="{PANPHY_LOGO_DATA_URI}" alt="PanPhy home" /></a>
       <div class="app-header-title">
         <div class="app-header-kicker">PANPHY LABS · ASSESSMENT WORKSPACE</div>
-        <h1>Physics IA Review</h1>
+        <h1>Physics IA &amp; EE Review</h1>
       </div>
       <div class="app-header-meta">
-        <span class="app-pill">4 criteria · 24 marks</span>
+        <span class="app-pill">IA 24 marks · EE 30 marks</span>
         <span class="app-pill">OCR + visual coverage checks</span>
         <span class="app-pill">Responses not stored</span>
       </div>
@@ -558,7 +572,7 @@ def show_marking_overlay() -> None:
         """
         <div class="marking-dialog-content" role="status" aria-live="polite" aria-busy="true">
           <div class="marking-dots" aria-hidden="true"><span></span><span></span><span></span></div>
-          <p>The marker is reviewing the IA and the auditor is checking the evidence.</p>
+          <p>The marker is reviewing the work and the auditor is checking the evidence.</p>
           <small>This may take a few minutes. Please keep this page open.</small>
         </div>
         """,
@@ -673,7 +687,9 @@ with st.sidebar:
         st.markdown(
             f"**Marking model** `{model}`  \n"
             f"**Visual model** `{vision_model}`  \n"
-            "**Rubric** first assessment 2025 · verified for 2026"
+            + "  \n".join(
+                f"**{item.short_name} rubric** {item.rubric_note}" for item in ASSESSMENT_TYPES.values()
+            )
         )
     st.markdown(
         """
@@ -736,6 +752,8 @@ if "last_upload_key" not in st.session_state:
     st.session_state.last_upload_key = None
 if "last_settings_key" not in st.session_state:
     st.session_state.last_settings_key = None
+if "assessment_key" not in st.session_state:
+    st.session_state.assessment_key = None
 
 
 def reset_reports() -> None:
@@ -783,6 +801,7 @@ def ensure_documents(
     ocr_language_setting: str,
     enable_visual_analysis: bool,
     pdf_password: str | None,
+    assessment: AssessmentType,
 ) -> None:
     ia_bytes = ia_upload.getvalue()
     sha256_hex = hashlib.sha256(ia_bytes).hexdigest()
@@ -798,6 +817,7 @@ def ensure_documents(
         vision_model,
         enable_visual_analysis,
         password_fingerprint,
+        assessment.key,
     )
     if st.session_state.doc_cache_key == cache_key:
         visual_state = st.session_state.debug_info.get("visual_analysis", {})
@@ -860,10 +880,13 @@ def ensure_documents(
             show_pdf_error(exc.user_message)
         except PdfExtractionError as exc:
             show_pdf_error(exc.user_message)
-        criteria_text = CRITERIA_PATH.read_text(encoding="utf-8")
+        criteria_text = (CRITERIA_DIR / assessment.rubric_file).read_text(encoding="utf-8")
 
     if ia_text.count("[No extractable text") > ia_pages * 0.7:
-        st.warning("IA PDF appears to have little extractable text (possibly scanned). Marking quality may suffer.")
+        st.warning(
+            f"{assessment.short_name} PDF appears to have little extractable text (possibly scanned). "
+            "Marking quality may suffer."
+        )
 
     injection_matches = scan_injection_phrases(ia_text)
     injection_findings = [
@@ -872,11 +895,11 @@ def ensure_documents(
     ]
     if injection_matches:
         st.warning(
-            "Possible instructions directed at the marker were found in the IA. "
+            f"Possible instructions directed at the marker were found in the {assessment.short_name}. "
             "Those lines are withheld from the models; teacher review will be required."
         )
         ia_text = redact_injection_spans(ia_text, injection_matches)
-    evidence_ledger = build_candidate_evidence_ledger(ia_text)
+    evidence_ledger = build_candidate_evidence_ledger(ia_text, assessment=assessment)
 
     unresolved_labels = find_unresolved_labels(ia_text)
     page_captions = find_page_captions(ia_text)
@@ -928,10 +951,13 @@ def ensure_documents(
     if not any(diag.has_text or diag.used_ocr for diag in ia_diagnostics) and not source_images:
         if visual_findings or visual_scan_failed_pages:
             show_pdf_error(
-                "No safe, readable IA evidence remains after screening. "
+                f"No safe, readable {assessment.short_name} evidence remains after screening. "
                 "A teacher must inspect the original PDF before marking."
             )
-        show_pdf_error("No readable IA evidence was found. Upload a clearer PDF or enable OCR before marking.")
+        show_pdf_error(
+            f"No readable {assessment.short_name} evidence was found. "
+            "Upload a clearer PDF or enable OCR before marking."
+        )
     evidence_index = build_page_evidence_index(ia_diagnostics, visuals_with_captions, source_images)
     skip_visual_analysis = bool(visual_findings or visual_scan_failed_pages)
     if enable_visual_analysis and visuals_with_captions and not skip_visual_analysis:
@@ -963,7 +989,7 @@ def ensure_documents(
         ia_ready = maybe_digest(
             client,
             model,
-            label="Student IA",
+            label=f"Student {assessment.short_name}",
             raw_text=ia_text,
             on_usage=record_model_usage,
         )
@@ -1049,7 +1075,8 @@ def ensure_documents(
 
 
 def run_primary_mark(client: OpenAI, model: str, ia_ready: AIResult) -> str:
-    prompt = EXAMINER1_PROMPT.format(
+    assessment = current_assessment()
+    prompt = PROMPTS[assessment.key][0].format(
         rubric_text=st.session_state.criteria_text,
         ia_text=ia_ready.text,
         evidence_index=st.session_state.ia_evidence_index,
@@ -1062,7 +1089,8 @@ def run_primary_mark(client: OpenAI, model: str, ia_ready: AIResult) -> str:
         client,
         model=model,
         instructions=(
-            "Act as the primary IB Physics IA marker. Apply all four rubric criteria by best fit, "
+            f"Act as the primary IB Physics {assessment.short_name} marker. "
+            f"Apply all {assessment.count_word} rubric criteria by best fit, "
             "cite original PDF pages for material claims, and return only the requested Markdown. "
             f"{ANTI_INJECTION_INSTRUCTIONS} Original attached PDF visuals are source evidence."
         ),
@@ -1076,7 +1104,8 @@ def run_primary_mark(client: OpenAI, model: str, ia_ready: AIResult) -> str:
 
 
 def run_evidence_audit(client: OpenAI, model: str, ia_ready: AIResult) -> str:
-    prompt = EXAMINER2_PROMPT.format(
+    assessment = current_assessment()
+    prompt = PROMPTS[assessment.key][1].format(
         rubric_text=st.session_state.criteria_text,
         ia_text=ia_ready.text,
         evidence_index=st.session_state.ia_evidence_index,
@@ -1091,7 +1120,7 @@ def run_evidence_audit(client: OpenAI, model: str, ia_ready: AIResult) -> str:
         model=model,
         instructions=(
             "Act as an evidence auditor. Check the primary marker's claims and marks against the "
-            "original IA, identify unsupported evidence, and recommend corrected marks only when "
+            f"original {assessment.short_name}, identify unsupported evidence, and recommend corrected marks only when "
             "justified. Return only the requested Markdown. "
             f"{ANTI_INJECTION_INSTRUCTIONS} Original attached PDF visuals are source evidence."
         ),
@@ -1113,7 +1142,7 @@ def quote_check_findings(report: str, *earlier_reports: str) -> list[dict[str, o
         for page_number, text in split_pages(st.session_state.ia_source_text)
     }
     reference = "\n".join(
-        [st.session_state.criteria_text, EXAMINER1_PROMPT, EXAMINER2_PROMPT, MODERATOR_PROMPT, *earlier_reports]
+        [st.session_state.criteria_text, *PROMPTS[current_assessment().key], *earlier_reports]
     )
     return unverified_quotes(report, page_texts, reference_text=reference)
 
@@ -1145,6 +1174,7 @@ def current_moderation_reasons() -> list[str]:
         or important_visual_missing,
         bool(st.session_state.ia_injection_findings or st.session_state.ia_visual_scan_failed_pages),
         summary_used=st.session_state.ia_used_digest,
+        assessment=current_assessment(),
         unverified_quote_reasons=(
             quote_check_reason("Primary mark", quote_check_findings(st.session_state.examiner1_report))
             + quote_check_reason(
@@ -1156,7 +1186,8 @@ def current_moderation_reasons() -> list[str]:
 
 
 def run_chief_moderation(client: OpenAI, model: str, ia_ready: AIResult, reasons: list[str]) -> str:
-    prompt = MODERATOR_PROMPT.format(
+    assessment = current_assessment()
+    prompt = PROMPTS[assessment.key][2].format(
         rubric_text=st.session_state.criteria_text,
         ia_text=ia_ready.text,
         evidence_index=st.session_state.ia_evidence_index,
@@ -1172,7 +1203,7 @@ def run_chief_moderation(client: OpenAI, model: str, ia_ready: AIResult, reasons
         client,
         model=model,
         instructions=(
-            "Act as Chief Moderator. Verify disputed evidence against the original IA and rubric, "
+            f"Act as Chief Moderator. Verify disputed evidence against the original {assessment.short_name} and rubric, "
             "adjudicate rather than average, and return only the requested Markdown. "
             f"{ANTI_INJECTION_INSTRUCTIONS} Original attached PDF visuals are source evidence."
         ),
@@ -1185,7 +1216,7 @@ def run_chief_moderation(client: OpenAI, model: str, ia_ready: AIResult, reasons
     if st.session_state.ia_injection_findings or st.session_state.ia_visual_scan_failed_pages:
         report = require_human_review(
             report,
-            "possible marker-directed instructions or unscreened visuals in the original IA; "
+            f"possible marker-directed instructions or unscreened visuals in the original {assessment.short_name}; "
             "inspect the PDF before using these provisional marks",
         )
     return report
@@ -1201,9 +1232,27 @@ workspace_left, workspace_right = st.columns([1.55, 1], gap="medium")
 with workspace_left:
     with st.container(border=True, key="upload_card"):
         st.markdown("### Add the student report")
+        assessment_choice = st.radio(
+            "Type of work",
+            options=list(ASSESSMENT_TYPES),
+            format_func=lambda key: ASSESSMENT_TYPES[key].label,
+            index=None,
+            horizontal=True,
+            key="assessment_choice",
+            disabled=inputs_disabled,
+            help="Choose the rubric to mark against before running the assessment.",
+        )
+        if assessment_choice == "ee":
+            st.caption(
+                "Extended essay: 5 criteria, 30 marks. Append the student's Reflection and Progress Form "
+                "(RPF) to the same PDF so Reflection can be marked; without it Reflection is marked 0 "
+                "and the result is flagged for teacher review."
+            )
+        elif assessment_choice == "ia":
+            st.caption("Internal assessment: 4 criteria, 24 marks.")
         st.caption("Upload one PDF. Selectable text gives the strongest evidence trail; OCR handles scans.")
         ia_file = st.file_uploader(
-            "Student IA PDF",
+            "Student PDF",
             type=["pdf"],
             key="ia_pdf",
             disabled=inputs_disabled,
@@ -1222,10 +1271,17 @@ with workspace_left:
         run_full = st.button(
             "Run complete assessment" if not st.session_state.moderator_report else "Run assessment again",
             type="primary",
-            disabled=inputs_disabled or not ia_file or (needs_pdf_password and not pdf_password),
-            help="Extract evidence, mark the IA, audit the evidence, then moderate flagged cases.",
+            disabled=(
+                inputs_disabled
+                or not ia_file
+                or not assessment_choice
+                or (needs_pdf_password and not pdf_password)
+            ),
+            help="Extract evidence, mark the work, audit the evidence, then moderate flagged cases.",
             width="stretch",
         )
+        if not assessment_choice:
+            st.caption("Select IA or EE to enable marking.")
         st.caption("A complete run makes several model calls and may take a few minutes.")
 
 with workspace_right:
@@ -1234,7 +1290,7 @@ with workspace_right:
         st.markdown(
             """
             <ul class="flow-list">
-              <li><b>1</b><span><strong>Primary marker</strong> applies the four rubric criteria</span></li>
+              <li><b>1</b><span><strong>Primary marker</strong> applies the IA or EE rubric criteria</span></li>
               <li><b>2</b><span><strong>Evidence auditor</strong> checks claims, calculations and cited pages</span></li>
               <li><b>3</b><span><strong>Chief Moderator</strong> resolves disagreements or evidence gaps</span></li>
             </ul>
@@ -1255,18 +1311,21 @@ elif st.session_state.last_upload_key is not None:
     reset_reports()
     st.session_state.last_upload_key = None
 
-current_settings_key = (enable_ocr, ocr_language, enable_visual_analysis, pdf_password)
+current_settings_key = (enable_ocr, ocr_language, enable_visual_analysis, pdf_password, assessment_choice)
+if assessment_choice and not st.session_state.is_processing:
+    st.session_state.assessment_key = assessment_choice
 if st.session_state.last_settings_key is None:
     st.session_state.last_settings_key = current_settings_key
 elif st.session_state.last_settings_key != current_settings_key:
     reset_reports()
     st.session_state.last_settings_key = current_settings_key
 
+assessment = current_assessment()
 primary_ready = not report_validation_issues(
-    st.session_state.examiner1_report, st.session_state.ia_used_digest
+    st.session_state.examiner1_report, st.session_state.ia_used_digest, assessment
 )
 reports_ready = all(
-    not report_validation_issues(report, st.session_state.ia_used_digest)
+    not report_validation_issues(report, st.session_state.ia_used_digest, assessment)
     for report in (st.session_state.examiner1_report, st.session_state.examiner2_report)
 )
 
@@ -1295,7 +1354,12 @@ for index, (label, done) in enumerate(step_states):
 st.markdown(f'<div class="step-row">{"".join(step_html)}</div>', unsafe_allow_html=True)
 
 with st.expander("Advanced · run or repeat one stage"):
-    stage_disabled = inputs_disabled or not ia_file or (needs_pdf_password and not pdf_password)
+    stage_disabled = (
+        inputs_disabled
+        or not ia_file
+        or not assessment_choice
+        or (needs_pdf_password and not pdf_password)
+    )
     columns = st.columns(3, gap="small")
     with columns[0]:
         run_examiner1 = st.button(
@@ -1369,6 +1433,7 @@ if processing_action:
             ocr_language_setting=ocr_language,
             enable_visual_analysis=enable_visual_analysis,
             pdf_password=pdf_password,
+            assessment=assessment,
         )
     except LLMError as exc:
         record_llm_error("prepare_documents", exc)
@@ -1381,8 +1446,8 @@ if processing_action:
 
     if processing_action == "full":
         try:
-            with st.status("Reviewing the IA and checking evidence…", expanded=True) as status:
-                status.write("The primary marker is applying the four rubric criteria.")
+            with st.status(f"Reviewing the {assessment.short_name} and checking evidence…", expanded=True) as status:
+                status.write(f"The primary marker is applying the {assessment.count_word} rubric criteria.")
                 st.session_state.examiner1_report = run_primary_mark(client, model, ia_ready)
 
                 status.write("The evidence auditor is checking claims, calculations and citations.")
@@ -1397,10 +1462,11 @@ if processing_action:
                     )
                     st.session_state.decision_mode = "moderated"
                 else:
-                    status.write("The audit confirmed all four marks and source checks.")
+                    status.write("The audit confirmed every mark and the source checks.")
                     agreed = build_agreed_decision(
                         st.session_state.examiner1_report,
                         st.session_state.examiner2_report,
+                        assessment,
                     )
                     require_valid_report(
                         agreed, "Agreed decision", ia_ready.used_digest,
@@ -1445,6 +1511,7 @@ if processing_action:
                     agreed = build_agreed_decision(
                         st.session_state.examiner1_report,
                         st.session_state.examiner2_report,
+                        assessment,
                     )
                     require_valid_report(
                         agreed, "Agreed decision", ia_ready.used_digest,
@@ -1506,7 +1573,7 @@ if has_any_report:
         or st.session_state.examiner1_report
         or st.session_state.examiner2_report
     )
-    score_map = extract_report_scores(decision_report)
+    score_map = extract_report_scores(decision_report, assessment)
     final_review_requested = bool(st.session_state.moderator_report) and report_requests_human_review(
         st.session_state.moderator_report
     )
@@ -1519,7 +1586,7 @@ if has_any_report:
         if st.session_state.decision_mode == "moderated"
         else []
     )
-    if len(score_map) == 4:
+    if len(score_map) == len(assessment.criteria):
         total = sum(score_map.values())
         needs_teacher_check = security_review_required or final_review_requested or bool(final_quote_findings)
         total_label = "Provisional total" if needs_teacher_check else (
@@ -1527,22 +1594,19 @@ if has_any_report:
         )
         criterion_cards = "".join(
             f'<div class="score-card"><div class="score-card-head"><span>{criterion}</span>'
-            f"<strong>{value}/6</strong></div>"
-            f'<div class="score-bar"><i style="width:{round(value / 6 * 100)}%"></i></div></div>'
-            for criterion, value in (
-                (name, score_map[name])
-                for name in ("Research design", "Data analysis", "Conclusion", "Evaluation")
-            )
+            f"<strong>{score_map[criterion]}/{maximum}</strong></div>"
+            f'<div class="score-bar"><i style="width:{round(score_map[criterion] / maximum * 100)}%"></i></div></div>'
+            for criterion, maximum in assessment.criteria
         )
         total_column, criteria_column = st.columns([1, 2.4], gap="small")
         total_column.markdown(
             f'<div class="score-total"><span>{total_label}</span>'
-            f"<div>{total}<small> / 24</small></div></div>",
+            f"<div>{total}<small> / {assessment.total}</small></div></div>",
             unsafe_allow_html=True,
         )
         criteria_column.markdown(f'<div class="score-grid">{criterion_cards}</div>', unsafe_allow_html=True)
     else:
-        st.warning("The report does not contain all four criterion marks. The total is hidden until the report is complete.")
+        st.warning("The report does not contain every criterion mark. The total is hidden until the report is complete.")
 
     reasons_text = "; ".join(st.session_state.moderation_reasons)
     if st.session_state.moderator_report:
@@ -1550,7 +1614,7 @@ if has_any_report:
             status_kind = "error"
             status_message = (
                 "**Teacher review required before using these provisional marks.** "
-                "The IA contained a possible marker-directed instruction or a visual that could not be screened."
+                f"The {assessment.short_name} contained a possible marker-directed instruction or a visual that could not be screened."
             )
         elif final_review_requested:
             status_kind = "warning"
@@ -1561,7 +1625,7 @@ if has_any_report:
             status_message = "**Final decision ready.** The flagged issues were reviewed by the Chief Moderator."
         else:
             status_kind = "success"
-            status_message = "**Final decision ready.** The evidence audit confirmed all four marks."
+            status_message = "**Final decision ready.** The evidence audit confirmed every criterion mark."
         if final_quote_findings:
             if status_kind == "success":
                 status_kind = "warning"
@@ -1575,7 +1639,7 @@ if has_any_report:
             )
         if reasons_text:
             status_message += f"  \nReview triggers: {reasons_text}"
-        status_message += "  \nReview the cited pages in the original IA before using this mark."
+        status_message += f"  \nReview the cited pages in the original {assessment.short_name} before using this mark."
     elif reasons_text:
         status_kind = "warning"
         status_message = f"**Moderator review needed.** {reasons_text}"
@@ -1588,13 +1652,14 @@ if has_any_report:
         st.session_state.examiner1_report,
         st.session_state.examiner2_report,
         st.session_state.moderator_report,
+        assessment,
     )
     download_columns = st.columns([1, 1, 1])
     with download_columns[0]:
         st.download_button(
             "Download complete bundle",
             data=combined_report,
-            file_name="physics_ia_assessment_bundle.md",
+            file_name=f"physics_{assessment.key}_assessment_bundle.md",
             mime="text/markdown",
             disabled=inputs_disabled,
             width="stretch",
@@ -1603,7 +1668,7 @@ if has_any_report:
         st.download_button(
             "Download final decision",
             data=st.session_state.moderator_report,
-            file_name="physics_ia_final_decision.md",
+            file_name=f"physics_{assessment.key}_final_decision.md",
             mime="text/markdown",
             disabled=inputs_disabled or not st.session_state.moderator_report,
             width="stretch",
@@ -1611,7 +1676,7 @@ if has_any_report:
     with download_columns[2]:
         if ia_file:
             st.download_button(
-                "Download original IA",
+                f"Download original {assessment.short_name}",
                 data=ia_file.getvalue(),
                 file_name=ia_file.name,
                 mime="application/pdf",
@@ -1702,11 +1767,12 @@ if has_any_report:
                 decision_mode=st.session_state.decision_mode,
                 escalation_reasons=st.session_state.moderation_reasons,
                 usage_log=st.session_state.usage_log,
+                assessment=assessment,
             )
             st.download_button(
                 "Download scoring record",
                 data=json.dumps(evaluation_record, indent=2),
-                file_name="physics_ia_scoring_record.json",
+                file_name=f"physics_{assessment.key}_scoring_record.json",
                 mime="application/json",
                 width="stretch",
             )
@@ -1715,7 +1781,10 @@ elif st.session_state.ia_page_diagnostics:
     st.markdown("---")
     st.markdown("### Evidence coverage")
     if security_review_required:
-        st.error("Teacher review required: possible marker-directed instructions or unscreened visuals were found in the original IA.")
+        st.error(
+            "Teacher review required: possible marker-directed instructions or unscreened visuals "
+            f"were found in the original {assessment.short_name}."
+        )
     for warning in st.session_state.ia_coverage_warnings:
         st.warning(warning)
     st.code(st.session_state.ia_coverage_report, language=None)
