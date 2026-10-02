@@ -1,14 +1,14 @@
 # Repository guide
 
-This Streamlit app reviews IB DP Physics IAs against the four criteria in `criteria/ib_phy_ia_criteria.md` (24 marks total). `README.md` covers setup and user-facing behavior. `todo.md` lists open follow-up work, with a recommended order.
+This Streamlit app reviews IB DP Physics IAs against the four criteria in `criteria/ib_phy_ia_criteria.md` (24 marks total), and physics extended essays against the five 2027 EE criteria in `criteria/ib_phy_ee_criteria.md` (30 marks; Discussion and evaluation /8, Reflection /4). The user picks IA or EE before marking. `README.md` covers setup and user-facing behavior. `todo.md` lists open follow-up work, with a recommended order.
 
 ## Where to work
 
 - `app.py`: UI, theme CSS, session state, assessment flow, stage runners, and report downloads. It runs the Streamlit page on import, so keep testable logic in the modules below.
 - `llm_utils.py`: OpenAI calls (`call_llm`, `call_vision_llm`), digesting, visual analysis, `STORE_RESPONSES` and the anti-injection instructions. Free of Streamlit; usage is reported through an `on_usage` callback.
-- `app_utils.py`: page evidence, prompt helpers, report validation and parsing, moderation routing, quote checks, and score exports.
+- `app_utils.py`: the `AssessmentType` specs (`IA`, `EE`: criteria and maxima, rubric and prompt files, evidence terms, pipeline label), page evidence, prompt helpers, report validation and parsing, moderation routing, quote checks, and score exports. Parsers take the assessment type and default to `IA`.
 - `pdf_utils.py`: PDF text, OCR, encryption detection, and source-image extraction. `PageRenderer` renders each page once for both OCR and rasterization; skipped PDF structures are logged, not silently dropped.
-- `prompts/`: primary marker, evidence auditor, and Chief Moderator instructions.
+- `prompts/`: primary marker, evidence auditor, and Chief Moderator instructions for the IA, and `ee_*_prompt.md` equivalents for the EE. Both sets use the same `.format(...)` placeholders.
 - `eval_marking.py`: offline comparison with human marks.
 - `.streamlit/config.toml`: theme colours and toolbar settings.
 - `tests/`: regression tests.
@@ -34,7 +34,7 @@ This Streamlit app reviews IB DP Physics IAs against the four criteria in `crite
    Never average marks.
 5. The Chief Moderator's `Human review recommended` verdict, missing verdicts, suspected injection, and unverified quotes in the final decision make the marks provisional in the UI.
 
-The three marking stages currently use `gpt-6-sol`. Their distinct jobs matter more than different personas. Do not claim independent model agreement or improved accuracy without evaluation against qualified human marks. Do not change how the models mark (see Phase 2 in `todo.md`) until the evaluation set exists.
+The three marking stages currently use `gpt-6-sol`. Their distinct jobs matter more than different personas. Do not claim independent model agreement or improved accuracy without evaluation against qualified human marks. Do not change how the models mark (see Phase 2 in `todo.md`) until the evaluation set exists. This applies to the EE prompts too, once the EE rubric text is verified.
 
 ## Invariants
 
@@ -44,7 +44,9 @@ The three marking stages currently use `gpt-6-sol`. Their distinct jobs matter m
 - Missing or ambiguous model verdicts must fail safe: escalate, or require review.
 - Keep `STORE_RESPONSES = False` unless the user explicitly changes the privacy policy. Never commit API keys, passwords, student PDFs, reports containing student text, or human-mark files.
 - Respect Streamlit session-state dependencies: rerunning an earlier stage must invalidate later reports.
-- Bump the `pipeline` value in `build_evaluation_record` whenever the marking flow changes, so evaluation results stay comparable.
+- Bump the assessment type's `pipeline` value (in `app_utils.py`) whenever its marking flow changes, so evaluation results stay comparable.
+- Changing the IA/EE selection must reset reports (it is part of the settings key and the document cache key). Never mark EE work with the IA rubric or the reverse.
+- EE Reflection is marked only from the RPF reflective statement; a missing RPF scores 0/4 with "RPF not supplied" and a human-review recommendation. The EE descriptors are paraphrased until verified (see `todo.md`); don't present them as verbatim.
 
 ## UI notes
 
