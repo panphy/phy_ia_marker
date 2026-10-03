@@ -1,4 +1,5 @@
 import base64
+import json
 import re
 import threading
 import time
@@ -871,6 +872,109 @@ def suggestions_validation_issues(
     if any(_heading_mark(report, name, maximum) is not None for name, maximum in assessment.criteria):
         issues.append("Suggestions for the student must not state criterion marks.")
     return issues
+
+
+EXAMINER_NOTES_PROMPT_FILE = "examiner_notes_prompt.md"
+MARGIN_NOTES_HEADING = "## Margin notes"
+MAX_MARGIN_NOTES = 40
+# A note for the student must not reveal marks, markbands or grades.
+STUDENT_NOTE_MARK_PATTERN = re.compile(
+    r"\b\d+\s*/\s*(?:4|6|8|24|26|30)\b|\bmark ?bands?\b|\bmarks?\b|\bgrades?\b", re.IGNORECASE
+)
+
+
+def split_margin_notes(
+    report: str,
+    page_count: int,
+    assessment: AssessmentType = IA,
+    *,
+    for_student: bool = False,
+) -> tuple[str, list[dict[str, object]], list[str]]:
+    """Separate a report's "## Margin notes" JSON from its Markdown body.
+
+    Returns the body, the usable notes ({page, quote, note, label}) and warnings about notes
+    that were dropped. Invalid or missing JSON gives no notes rather than an error, because
+    margin notes are an aid and never affect marks.
+    """
+    match = re.search(rf"^{re.escape(MARGIN_NOTES_HEADING)}\s*$", report, flags=re.IGNORECASE | re.MULTILINE)
+    if not match:
+        return report.strip(), [], ["No margin notes were returned."]
+    body = report[: match.start()].strip()
+    section = report[match.end():]
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", section, flags=re.DOTALL)
+    raw = fenced.group(1) if fenced else section[section.find("["): section.rfind("]") + 1]
+    try:
+        items = json.loads(raw)
+    except ValueError:
+        return body, [], ["The margin notes could not be read."]
+    if not isinstance(items, list):
+        return body, [], ["The margin notes could not be read."]
+    notes: list[dict[str, object]] = []
+    dropped = {"page": 0, "marks": 0, "format": 0}
+    for item in items:
+        if not isinstance(item, dict):
+            dropped["format"] += 1
+            continue
+        page, quote, note = item.get("page"), item.get("quote") or "", item.get("note")
+        if type(page) is not int or not isinstance(quote, str) or not isinstance(note, str) or not note.strip():
+            dropped["format"] += 1
+            continue
+        if not 1 <= page <= page_count:
+            dropped["page"] += 1
+            continue
+        if for_student and STUDENT_NOTE_MARK_PATTERN.search(note):
+            dropped["marks"] += 1
+            continue
+        label = item.get("criterion")
+        notes.append(
+            {
+                "page": page,
+                "quote": " ".join(quote.split())[:300],
+                "note": " ".join(note.split())[:400],
+                "label": label if label in assessment.names else "General",
+            }
+        )
+    warnings = []
+    if dropped["page"]:
+        warnings.append(f"{dropped['page']} margin note(s) cited pages outside this PDF and were dropped.")
+    if dropped["marks"]:
+        warnings.append(f"{dropped['marks']} student margin note(s) mentioned marks and were dropped.")
+    if dropped["format"]:
+        warnings.append(f"{dropped['format']} margin note(s) were incomplete and were dropped.")
+    if len(notes) > MAX_MARGIN_NOTES:
+        warnings.append(f"Only the first {MAX_MARGIN_NOTES} margin notes are used.")
+        notes = notes[:MAX_MARGIN_NOTES]
+    return body, notes, warnings
+
+
+def build_examiner_cover(
+    assessment: AssessmentType,
+    final_report: str,
+    status_message: str,
+) -> str:
+    """First pages of the examiner's annotated PDF: marks, status, and the full final decision."""
+    scores = extract_report_scores(final_report, assessment)
+    lines = [f"# Examiner copy: IB DP Physics {assessment.short_name}"]
+    if assessment.marking_notice:
+        lines.append(f"> **Note:** {assessment.marking_notice}")
+    lines += ["", "| Criterion | Mark | Maximum |", "|---|---:|---:|"]
+    for criterion, maximum in assessment.criteria:
+        mark = scores.get(criterion)
+        lines.append(f"| {criterion} | {'—' if mark is None else mark} | {maximum} |")
+    total = sum(scores.values()) if len(scores) == len(assessment.criteria) else "—"
+    lines.append(f"| **Total** | **{total}** | **{assessment.total}** |")
+    if status_message:
+        lines += ["", status_message.replace("  \n", "\n\n")]
+    lines += [
+        "",
+        "Numbered margin notes on the following pages show the evidence behind these marks. "
+        "Notes marked “page note” could not be matched to the page's text; check them against the page.",
+        "",
+        "---",
+        "",
+        final_report.strip(),
+    ]
+    return "\n".join(lines)
 
 
 def build_suggestions_document(report: str, assessment: AssessmentType = IA) -> str:

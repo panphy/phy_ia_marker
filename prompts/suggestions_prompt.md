@@ -63,3 +63,18 @@ Then one section per criterion, using these exact headings:
 Under each criterion heading give 2–4 bullet points. Start each with an action verb, e.g.
 "- **Add** an uncertainty for each processed value in the table on Page 4, ...". If a criterion
 is already strong, give one point on how to keep it secure and one small refinement.
+
+Finally, add margin notes that will be printed beside the student's draft. Give 6–15 notes, each
+tied to a specific place a suggestion above refers to:
+- `note`: one action in at most 25 words, starting with a verb, with no marks or markbands.
+- `quote`: copied exactly, character for character, from the extracted text of that page:
+  4–15 consecutive words, on one line where possible, with no ellipsis. Use an empty string for a
+  note about a whole page or a visual with no quotable text.
+- `criterion`: one of {criterion_list}, or "General".
+
+## Margin notes
+```json
+[
+  {{"page": 4, "quote": "exact words from page 4", "criterion": "...", "note": "Add ..."}}
+]
+```

@@ -252,6 +252,7 @@ def test_suggestions_prompt_formats_and_keeps_its_safeguards() -> None:
         ia_text="--- Page 1 ---\nEssay",
         final_report="Final",
         criterion_headings="\n".join(f"- `### {name}`" for name in EE.names),
+        criterion_list=", ".join(f'"{name}"' for name in EE.names),
         digest_citation_guidance="",
     )
     assert "### Discussion and evaluation" in filled
