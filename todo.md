@@ -9,13 +9,10 @@ every task here.
 - **Phase 1 blocks Phase 2.** Do not change how the models mark (prompts, stage structure, rubric
   guidance) until you can measure the effect against qualified human marks.
 - **Engineering** tasks don't affect marks and can be done at any time.
-- One task per branch or PR. Keep prompt placeholders aligned with their `.format(...)` calls.
-- Run `pytest tests/` after every change. For UI changes, also do a Streamlit smoke check.
-- Update `README.md` when user-facing behavior or the assessment flow changes.
-- When you finish a task, tick it, record the result (the metric change or a link to the PR), and move it
-  to **Done**.
-- Never commit student PDFs, reports containing student text, human-mark files or API keys. Evaluation
-  data stays outside the repository.
+- One task per branch or PR. Follow the checks in `AGENTS.md` ("Before committing").
+- When you finish a task, record the result (the metric change or a link to the PR) and move it to
+  **Done**.
+- Evaluation data (student work, human marks) stays outside the repository.
 
 ---
 
@@ -24,13 +21,15 @@ every task here.
 ### [ ] 1. Build a human-marked evaluation set  *(blocks Phase 2)*
 - **Why:** there's no evidence yet that the audit or moderation stages improve accuracy, and no way to
   test prompt changes.
-- **What:** gather 20–40 IAs with qualified human or IB-moderated marks. Start with IB-published exemplars
-  and moderator comments. Export a scoring record for each run (the "Download scoring record" button,
-  built by `build_evaluation_record` in `app_utils.py`), add `human_marks` and `human_review_required`,
-  and save as JSONL outside the repo. Use these IAs as the regression set for every marking change.
-- **Tooling: done (Sept 2026).** `python eval_marking.py records.jsonl` reports accuracy for each stage
-  (`stages.primary`, `stages.audit`, `stages.final`), `decision_modes`, `escalation_rate`, and
-  `escalation_reasons` grouped with marks and counts replaced by `#`. It's tested with synthetic records.
+- **What:** follow the protocol in `CALIBRATION.md`: 20–40 consented/de-identified IAs across all bands
+  and investigation types, marked blind by two qualified teachers (or IB-moderated), with a held-out
+  subset. Start with IB-published exemplars and moderator comments. Export a scoring record for each
+  run (the "Download scoring record" button, `build_evaluation_record` in `app_utils.py`), add
+  `human_marks` and `human_review_required`, and save as JSONL outside the repo. Use these IAs as the
+  regression set for every marking change.
+- **Tooling: done.** `python eval_marking.py records.jsonl` reports per-stage accuracy, signed bias,
+  paired stage comparisons, decision modes and escalation rates/reasons, and teacher-labelled
+  annotation quality (`annotation_reviews`). It's tested with synthetic records only.
 - **Remaining (needs the user):** collect the IAs and human marks, run the report, and record the
   baseline figures here.
 - **Done when:** baseline per-stage accuracy and escalation figures for the set are recorded here.
@@ -38,31 +37,34 @@ every task here.
 ### [ ] 2. Measure run-to-run variance
 - **Why:** each stage is sampled once. Unstable marks are a hidden risk and could become an escalation
   signal.
-- **Tooling: done (Sept 2026).** `python eval_marking.py --variance records.jsonl` groups repeated runs
-  by `case_id` and reports each criterion's mean spread and changed rate, plus total spread and
-  the share of cases where any mark changed. It needs no human marks.
+- **Tooling: done.** `python eval_marking.py --variance records.jsonl` groups repeated runs by
+  `case_id`, pipeline, model and configuration and reports each criterion's mean spread and changed rate, total
+  spread and the share of cases where any mark changed. It needs no human marks.
 - **Remaining:** mark each evaluation IA at least twice, export the records, and run the report.
 - **Done when:** the spread per criterion is reported for the evaluation set. Record the baseline here.
 
 ### [ ] 3. Measure how often the quote check flags genuine quotes
-- **Why:** `unverified_quotes` in `app_utils.py` compares quotes with extracted page text. OCR noise, or
-  quotes read from a graph image on a page that also has plenty of text, can make a genuine quote look
-  unverified.
+- **Why:** `unverified_quotes` in `app_utils.py` fuzzy-matches report quotes against extracted page text,
+  and IA annotation quotes must match the page exactly (`parse_record` in `assessment.py`, which forces
+  a rerun on failure). OCR noise, or quotes read from a graph image, can make a genuine quote fail
+  either check.
 - **What:** on the evaluation runs, sample the flagged quotes and label each one genuine or fabricated.
-  Tune `MIN_VERIFIABLE_PAGE_CHARS`, the fuzzy `threshold`, or the handling of OCR pages (the `used_ocr`
-  diagnostics) if genuine quotes are flagged too often.
+  Also count IA records rejected for quotes. Tune `MIN_VERIFIABLE_PAGE_CHARS`, the fuzzy `threshold`,
+  the exact-match normalisation, or the handling of OCR pages (the `used_ocr` diagnostics) if genuine
+  quotes are flagged too often.
 - **Done when:** the share of flags that were genuine quotes is recorded here, and any threshold change
   has a regression test.
 
 ### [ ] 4. Real end-to-end check of the UI and safeguards
-- **Why:** the September 2026 UI and safeguard changes were checked with unit tests and simulated
-  session state only, never a real marking run.
-- **What:** with an API key and a non-sensitive test IA, run a full assessment and check:
-  - the progress step shows "In progress" while running;
-  - the results banner states;
-  - the audit heading format (`— audited X/6`) is followed;
-  - the total check doesn't cause frequent reruns;
-  - encrypted-PDF upload works.
+- **Why:** the UI, safeguards, source-anchored IA records and annotated PDFs were checked with unit
+  tests and simulated session state only, never a real marking run.
+- **What:** with an API key and a non-sensitive test IA and EE, run full assessments and check:
+  - the progress step shows "In progress" while running, and the results banner states;
+  - how often IA records fail validation (word limits, exact quotes) and force reruns;
+  - the EE audit heading format (`— audited X/6`) is followed and the total check doesn't cause
+    frequent reruns;
+  - large IAs retrieve the right original pages from the digest;
+  - encrypted-PDF upload works, and annotated PDFs are re-encrypted with highlights on the right text.
 
   Also check whether the Streamlit settings menu still offers dark mode. The CSS assumes the light theme
   set by `base = "light"` in `.streamlit/config.toml`.
@@ -73,8 +75,9 @@ every task here.
 ## Phase 2 — Improve marking (only with Phase 1 metrics)
 
 For each task: run the evaluation set before and after. Keep the change only if final-mark accuracy holds
-or improves, and escalation stays reasonable. Record both results here, and bump the `pipeline` value in
-`build_evaluation_record` (currently `evidence_audit_v1`) so results stay comparable.
+or improves, and escalation stays reasonable. Record both results here, and bump the assessment type's `pipeline` value in
+`app_utils.py` (currently `source_anchored_v2` for the IA, `ee_evidence_audit_v2` for the EE) so results
+stay comparable.
 
 ### [ ] 5. Blind audit pass
 - **Why:** the auditor reads the primary marks first and tends to anchor on them, so "exact agreement"
@@ -87,22 +90,22 @@ or improves, and escalation stays reasonable. Record both results here, and bump
   `app_utils.py` (`moderation_reasons`), tests.
 
 ### [ ] 6. Make the primary marker neutral
-- **Why:** `prompts/examiner1_prompt.md` still frames the only full marker as "the Experimentalist", with
-  extra attention on method and evaluation. `AGENTS.md` says the stages' jobs matter more than personas.
+- **Why:** `prompts/examiner1_prompt.md` still frames the IA primary marker as "the Experimentalist",
+  with an extra lens on method and evaluation; the stages' jobs should matter more than personas.
 - **What:** remove the lens, or balance it with equal attention to data analysis and the conclusion.
-  Rename "Primary mark — Experimentalist" in `build_combined_report` and the "Examiner 1 decision"
-  heading. Update `test_primary_and_auditor_prompts_have_distinct_jobs`.
+  Rename "Primary mark — Experimentalist" in `build_combined_report` (`app_utils.py`). Update
+  `test_primary_and_auditor_prompts_have_distinct_jobs`.
 
 ### [ ] 7. Also check against the band below
 - **Why:** the prompts ask only "why not higher", which may bias marks downward.
-- **What:** add a matching "why not lower" check to the primary and moderator prompts. Keep the output
-  parseable by `extract_report_scores` and `report_has_expected_citations`.
+- **What:** add a matching "why not lower" check to the primary and moderator prompts (IA and EE). Keep
+  the output valid for the IA record schema in `assessment.py` and, for the EE, parseable by
+  `extract_report_scores` and `report_has_expected_citations`.
 
 ### [ ] 8. Reduce moderator bias toward one report
 - **Why:** the moderator always sees the primary report then the audit, labelled by role.
 - **What:** try limiting adjudication to the disputed criteria, and neutral labels ("Report A/B") in a
-  randomized order. Make sure the final table still maps back to primary/audit columns for
-  `extract_report_scores`.
+  randomized order. Make sure the final decision still maps back to the primary and audit marks.
 
 ### [ ] 9. Add uncertainty-handling guidance
 - **Why:** the rubric defers uncertainty expectations to the Physics Teacher Support Material, which the
@@ -123,12 +126,13 @@ or improves, and escalation stays reasonable. Record both results here, and bump
 
   It must not add requirements the rubric doesn't state.
 
-### [ ] 11. Mark from the full text rather than the summary
-- **Why:** when an IA is summarised (`maybe_digest`, over `MAX_RAW_CHARS_BEFORE_DIGEST`), the marker and
-  auditor both see a summary written with low reasoning effort, and the auditor can't catch summary
-  errors. Such cases now always escalate, but the Chief Moderator also only sees the summary.
-- **What:** give the models the full page text when it fits in context, and use the summary only for
-  finding things. Alternatively, raise the threshold to reflect current context limits.
+### [ ] 11. Mark long EEs from the original text rather than the summary
+- **Why:** when an EE is summarised (`maybe_digest`, over `MAX_RAW_CHARS_BEFORE_DIGEST`), all three
+  stages see only the summary, so the auditor can't catch summary errors; such cases always escalate.
+  The IA already uses the digest only to navigate to original pages (`retrieve_stage_sources` in
+  `app.py`, `original_page_selection` in `assessment.py`).
+- **What:** apply the same original-page retrieval to the EE, or raise the threshold to reflect current
+  context limits.
 
 ### [ ] 12. Word-count diagnostic
 - **What:** first confirm the current Physics guide's word-limit policy, including whether text beyond
@@ -158,8 +162,9 @@ or improves, and escalation stays reasonable. Record both results here, and bump
   EE prompts.
 
 ### [ ] 15. Evaluate the suggestions for improvement and the margin notes
-- **Why:** the student-facing suggestions (Oct 2026) are checked only for structure (a cited
-  section per criterion, valid pages, no marks) and for unverified quotes.
+- **Why:** the student-facing suggestions are checked only for structure (a cited section per
+  criterion, valid pages, no marks) and for unverified quotes. `CALIBRATION.md` describes the
+  annotation ratings (`citation_correct`, `supported`, `actionable`).
 - **What:** on the evaluation runs, have a teacher rate a sample of suggestions as accurate,
   actionable and appropriately concise, and check that none writes content for the student.
   For both annotated PDFs, record the share of notes placed as page notes (quote not found) and
@@ -224,21 +229,16 @@ Details are in git history and the merged PRs.
   on their own and appended to the bundle.
 - **Annotated PDFs and model update (Oct 2026):** examiner and student copies of the upload with
   highlighted evidence and margin notes (`pdf_annotate.py`; optional via a sidebar toggle, off by
-  default, because it adds one model call per run). The
+  default, because it adds model output and, for the EE, one more call). The
   marking model changed from `gpt-6-sol` to `gpt-6.1-sol`.
+- **Source-anchored IA assessment (Oct 2026):** IA stages return validated JSON records
+  (`assessment.py`) with central band/total calculation and rendering; exact quote, visual-ID, page and
+  annotation-limit checks (≤40 words, ≤3 per criterion); unresolved source gaps and human-review
+  verdicts kept provisional; original pages retrieved from digest navigation, plus extra visuals and
+  enlarged pages during audit and moderation; per-item coverage and visual readability; maximum marks
+  allowed without invented weaknesses; offline Streamlit flow and PDF annotation tests; signed bias,
+  paired stage comparisons, repeat stability and annotation metrics in `eval_marking.py`. Pipeline
+  `source_anchored_v2`.
 - **Dropped:** "Fix dataclass Exception inheritance". `LLMError` has an explicit `__init__`, and
   `str(PdfExtractionError("msg"))` already returns the message.
 
-
-## Source-anchored assessment update
-
-- [x] Generate validated assessment records; calculate bands/totals and render reports centrally.
-- [x] Verify original-source quotes, visual IDs, page ranges and concise annotation limits.
-- [x] Keep unresolved evidence problems and model human-review verdicts visibly provisional.
-- [x] Retrieve original pages from digest navigation and additional visuals/enlarged pages during audit and moderation.
-- [x] Track per-item source coverage and model-reported visual readability.
-- [x] Add concise feedback, source-page navigation and native PDF highlights/comments.
-- [x] Allow maximum-mark decisions without invented weaknesses or compulsory improvements.
-- [x] Add offline Streamlit flow checks, PDF annotation checks and validation regressions.
-- [x] Add signed bias, paired stage comparisons, repeated-run stability and teacher-labelled annotation metrics.
-- [ ] Execute the qualified-human calibration protocol in `CALIBRATION.md`; synthetic automated tests do not measure marking accuracy.
