@@ -10,14 +10,17 @@
   text (with page numbers) before relying on the marks.
 - The same criteria apply to every subject. This file adds physics-specific application notes,
   labelled as app guidance.
+- **Scope of this app:** criteria A–D only (26 marks). Criterion E, Reflection (4 marks), is
+  assessed from the Reflection and Progress Form (RPF), which is usually not available when the
+  app is used, so the app does not mark it. Its descriptors are omitted here.
 
 ## Application notes
 These notes explain how the app applies the criteria; they do not replace or add criteria.
 
 - Use a holistic, best-fit judgment within each criterion. An essay may show qualities from
   adjacent bands; award the mark that most fairly reflects the evidence as a whole.
-- Criteria A–D assess the essay only. Criterion E assesses only the reflective statement on the
-  Reflection and Progress Form (RPF). Do not credit RPF content under A–D, or essay content under E.
+- Criteria A–D assess the essay only. Do not credit RPF content, if any is attached, under A–D.
+  Do not mark criterion E.
 - The essay has a 4,000-word limit (RPF reflective statement: 500 words). Examiners do not read or
   assess material beyond the limit. The app cannot count words reliably; if the essay looks
   substantially over the limit, say so and recommend human review instead of adjusting marks.
@@ -42,7 +45,9 @@ These notes explain how the app applies the criteria; they do not replace or add
 - B. Knowledge and understanding (max: 6)
 - C. Analysis and line of argument (max: 6)
 - D. Discussion and evaluation (max: 8)
-- E. Reflection (max: 4) — assessed from the RPF reflective statement
+- E. Reflection (max: 4) — assessed from the RPF reflective statement; **not marked by this app**
+
+Marks reported by this app are out of 26 (A–D), not the official 30.
 
 ## Criterion details
 
@@ -100,20 +105,7 @@ the research (its strengths and limitations).
 | 5–6 | The essay includes a balanced discussion of the significance of the findings, often supported by suitable evidence. The evaluation describes relevant strengths and limitations of the research. |
 | 7–8 | The essay includes a balanced discussion of the significance of the findings, fully supported by suitable evidence. The evaluation is effective and explains the relevant strengths and limitations of the research and their effect on the conclusion. |
 
-### Reflection (max: 4)
-Does the student's reflective statement on the RPF evaluate the learning experience?
-
-Assessed only from the RPF reflective statement (no more than 500 words), written after the
-final reflection session (viva voce).
-
-| Markband | Descriptor (paraphrased) |
-|---|---|
-| 0 | The work does not reach the standard described by the descriptors below, or no RPF reflective statement is available. |
-| 1–2 | The reflective statement is mainly descriptive of the research process, with few or general examples and limited evidence of the student's growth as a learner. |
-| 3–4 | The reflective statement is evaluative, includes specific examples, and shows how the experience developed the student as a learner and thinker, including skills or learning that can transfer to other contexts. |
-
 ## Missing/unclear
 - Verbatim descriptors, glossary terms and page numbers from the official guide are not included
   yet (see "Status" above).
-- How a missing RPF is handled in this app: Reflection is marked 0/4 with "RPF not supplied", and
-  human review is recommended, so that a missing upload is not mistaken for a weak reflection.
+- Criterion E (Reflection) descriptors are omitted because the app does not mark it.

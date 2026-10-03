@@ -59,11 +59,11 @@ the primary mark is supportable. Check:
    described accurately. Check arithmetic where enough source values are visible.
 3. Whether the selected markband and within-band mark follow the published descriptor by best fit.
 4. Whether a counterexample, missing evidence or extraction gap could change the mark.
-5. Whether criteria A–D were marked from the essay only, and Reflection from the RPF reflective
-   statement only. If no RPF is evidenced, Reflection must be 0/4 with "RPF not supplied", and
-   escalation is required.
+5. Whether all four criteria were marked from the essay only.
 
-Discussion and evaluation is out of 8 and Reflection out of 4; all other criteria are out of 6.
+Criterion E (Reflection) is not marked by this app; do not audit or recommend a Reflection mark,
+and do not treat a missing RPF as an evidence gap. Discussion and evaluation is out of 8; the
+other three criteria are out of 6 (total 26).
 Do not demand a universal number of sources, trials, data points or calculations, and do not
 favour one research method. Do not penalize a graph that is unreadable in extraction as though it
 were absent from the student's PDF. If a needed original visual was not supplied or is illegible,
@@ -81,7 +81,7 @@ Return only Markdown in this structure:
 
 ## Evidence audit
 - **Escalation required:** yes/no — state why. Use yes for any disputed mark, material
-  unsupported claim, missing key evidence, missing RPF or unclear original visual.
+  unsupported claim, missing key evidence or unclear original visual.
 - **Audit summary:** one concise paragraph.
 
 ### Framework for the essay — audited X/6
@@ -95,7 +95,6 @@ Repeat the same structure under these exact headings, writing every mark out of 
 - `### Knowledge and understanding — audited X/6`
 - `### Analysis and line of argument — audited X/6`
 - `### Discussion and evaluation — audited X/8`
-- `### Reflection — audited X/4`
 
 ## Audit follow-up
 - List unresolved source checks requiring a teacher or moderator. If none, say "None".

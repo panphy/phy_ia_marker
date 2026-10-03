@@ -1,6 +1,6 @@
 # Repository guide
 
-This Streamlit app reviews IB DP Physics IAs against the four criteria in `criteria/ib_phy_ia_criteria.md` (24 marks total), and physics extended essays against the five 2027 EE criteria in `criteria/ib_phy_ee_criteria.md` (30 marks; Discussion and evaluation /8, Reflection /4). The user picks IA or EE before marking. `README.md` covers setup and user-facing behavior. `todo.md` lists open follow-up work, with a recommended order.
+This Streamlit app reviews IB DP Physics IAs against the four criteria in `criteria/ib_phy_ia_criteria.md` (24 marks total), and physics extended essays against criteria A–D of the 2027 EE model in `criteria/ib_phy_ee_criteria.md` (26 marks; Discussion and evaluation /8). EE criterion E, Reflection (/4), is deliberately not marked because the RPF is usually unavailable; the official total is 30. The user picks IA or EE before marking. `README.md` covers setup and user-facing behavior. `todo.md` lists open follow-up work, with a recommended order.
 
 ## Where to work
 
@@ -8,7 +8,7 @@ This Streamlit app reviews IB DP Physics IAs against the four criteria in `crite
 - `llm_utils.py`: OpenAI calls (`call_llm`, `call_vision_llm`), digesting, visual analysis, `STORE_RESPONSES` and the anti-injection instructions. Free of Streamlit; usage is reported through an `on_usage` callback.
 - `app_utils.py`: the `AssessmentType` specs (`IA`, `EE`: criteria and maxima, rubric and prompt files, evidence terms, pipeline label), page evidence, prompt helpers, report validation and parsing, moderation routing, quote checks, and score exports. Parsers take the assessment type and default to `IA`.
 - `pdf_utils.py`: PDF text, OCR, encryption detection, and source-image extraction. `PageRenderer` renders each page once for both OCR and rasterization; skipped PDF structures are logged, not silently dropped.
-- `prompts/`: primary marker, evidence auditor, and Chief Moderator instructions for the IA, and `ee_*_prompt.md` equivalents for the EE. Both sets use the same `.format(...)` placeholders.
+- `prompts/`: primary marker, evidence auditor, and Chief Moderator instructions for the IA, and `ee_*_prompt.md` equivalents for the EE. Both sets use the same `.format(...)` placeholders. `suggestions_prompt.md` is shared by both and has its own placeholders (`work_name`, `final_report`, `criterion_headings`).
 - `eval_marking.py`: offline comparison with human marks.
 - `.streamlit/config.toml`: theme colours and toolbar settings.
 - `tests/`: regression tests.
@@ -32,7 +32,8 @@ This Streamlit app reviews IB DP Physics IAs against the four criteria in `crite
    - a suspected injection.
 
    Never average marks.
-5. The Chief Moderator's `Human review recommended` verdict, missing verdicts, suspected injection, and unverified quotes in the final decision make the marks provisional in the UI.
+5. After any final decision, a suggestions call writes student-facing suggestions for improvement (no marks, page-cited, validated by `suggestions_validation_issues`). A failure there keeps the marks and can be retried. Rerunning any marking stage clears the suggestions.
+6. The Chief Moderator's `Human review recommended` verdict, missing verdicts, suspected injection, and unverified quotes in the final decision make the marks provisional in the UI.
 
 The three marking stages currently use `gpt-6-sol`. Their distinct jobs matter more than different personas. Do not claim independent model agreement or improved accuracy without evaluation against qualified human marks. Do not change how the models mark (see Phase 2 in `todo.md`) until the evaluation set exists. This applies to the EE prompts too, once the EE rubric text is verified.
 
@@ -46,7 +47,8 @@ The three marking stages currently use `gpt-6-sol`. Their distinct jobs matter m
 - Respect Streamlit session-state dependencies: rerunning an earlier stage must invalidate later reports.
 - Bump the assessment type's `pipeline` value (in `app_utils.py`) whenever its marking flow changes, so evaluation results stay comparable.
 - Changing the IA/EE selection must reset reports (it is part of the settings key and the document cache key). Never mark EE work with the IA rubric or the reverse.
-- EE Reflection is marked only from the RPF reflective statement; a missing RPF scores 0/4 with "RPF not supplied" and a human-review recommendation. The EE descriptors are paraphrased until verified (see `todo.md`); don't present them as verbatim.
+- EE Reflection is not marked (the user's decision, Oct 2026): `EE.criteria` holds A–D only, totals are /26, and `EE.marking_notice` must be shown wherever EE marks appear (results, final-decision download, bundle). The EE descriptors are paraphrased until verified (see `todo.md`); don't present them as verbatim.
+- Suggestions for improvement go to students: they must never state marks, markbands or totals, must cite pages, and must not write replacement content for the student.
 
 ## UI notes
 

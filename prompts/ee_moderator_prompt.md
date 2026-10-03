@@ -63,11 +63,11 @@ the final mark is not higher. Do not impose universal thresholds, favour one res
 reward irrelevant features. When an image or calculation cannot be verified, say
 **"not evidenced in the available source"** and recommend human review if it could change a mark.
 
-Criteria A–D assess the essay only; Reflection assesses only the RPF reflective statement. If no
-RPF is evidenced, Reflection is 0/4 with "RPF not supplied" and human review is recommended.
+All four criteria assess the essay only. Criterion E (Reflection) is not marked by this app: do
+not award or tabulate it, and do not treat a missing RPF as a limitation.
 If the essay appears substantially over 4,000 words, recommend human review; do not invent a
-word count or a penalty. Discussion and evaluation is out of 8 and Reflection out of 4; all
-other criteria are out of 6.
+word count or a penalty. Discussion and evaluation is out of 8; the other three criteria are out
+of 6 (total 26).
 
 Every material final-mark claim needs **Page N**, **Pages N–M**, or an exact digest page label.
 Put only verbatim EE text, from the cited page, inside quotation marks.
@@ -78,7 +78,7 @@ Never invent a value, source location or figure label. Keep visual-analysis hint
 Return only Markdown in this structure:
 
 ## Final decision
-- **Total:** X/30 (must equal the sum of the five final criterion marks)
+- **Total:** X/26 (must equal the sum of the four final criterion marks)
 - **Human review recommended:** yes/no — reason
 - **Overall rationale:** one concise paragraph
 
@@ -96,7 +96,6 @@ Repeat the same structure under these exact headings, writing every mark out of 
 - `### Knowledge and understanding — X/6`
 - `### Analysis and line of argument — X/6`
 - `### Discussion and evaluation — X/8`
-- `### Reflection — X/4`
 
 ## Final marks
 | Criterion | Primary | Audit | Final | Maximum | Decisive evidence |
@@ -105,8 +104,7 @@ Repeat the same structure under these exact headings, writing every mark out of 
 | Knowledge and understanding | X | X | X | 6 | ... |
 | Analysis and line of argument | X | X | X | 6 | ... |
 | Discussion and evaluation | X | X | X | 8 | ... |
-| Reflection | X | X | X | 4 | ... |
-| **Total** | **X** | **X** | **X** | **30** | |
+| **Total** | **X** | **X** | **X** | **26** | |
 
 ## Priority feedback
 - Give the three highest-impact rubric-linked improvements.

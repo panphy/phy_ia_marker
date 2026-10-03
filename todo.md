@@ -145,16 +145,23 @@ or improves, and escalation stays reasonable. Record both results here, and bump
   structure follow the *Extended essay guide* (first assessment 2027), but the descriptor wording
   in `criteria/ib_phy_ee_criteria.md` was assembled from secondary summaries.
 - **What:** copy each criterion's question, strands, markband descriptors and glossary verbatim from
-  the guide, with page numbers, in the same layout as the IA rubric. Confirm the Reflection
-  markbands (currently 0 / 1–2 / 3–4), the word-limit rule, and the physics subject-specific
-  guidance. Change the "paraphrased" status line and the sidebar `rubric_note` for `EE` in
+  the guide, with page numbers, in the same layout as the IA rubric, for criteria A–D (the app
+  does not mark Reflection; see Done). Confirm the word-limit rule and the physics
+  subject-specific guidance. Change the "paraphrased" status line and the sidebar `rubric_note` for `EE` in
   `app_utils.py`, and update `test_ee_rubric_and_prompts_name_every_criterion_with_its_maximum`.
 - **Done when:** the rubric file states the guide edition and pages, and contains no paraphrase.
 
 ### [ ] 14. EE evaluation set
 - **What:** as task 1, but for physics EEs with qualified or IB-moderated marks (records have
-  `"assessment": "ee"` and pipeline `ee_evidence_audit_v1`; `eval_marking.py` handles both).
-  Include essays with and without an attached RPF. Phase 2 rules apply to the EE prompts.
+  `"assessment": "ee"` and pipeline `ee_evidence_audit_v2`; `eval_marking.py` handles both).
+  Human marks must cover criteria A–D only (Reflection is not marked). Phase 2 rules apply to the
+  EE prompts.
+
+### [ ] 15. Evaluate the suggestions for improvement
+- **Why:** the student-facing suggestions (Oct 2026) are checked only for structure (a cited
+  section per criterion, valid pages, no marks) and for unverified quotes.
+- **What:** on the evaluation runs, have a teacher rate a sample of suggestions as accurate,
+  actionable and appropriately concise, and check that none writes content for the student.
 
 ---
 
@@ -205,5 +212,12 @@ Details are in git history and the merged PRs.
   - `PageRenderer` opens each PDF once and renders each page once for OCR and vector rasterization;
   - narrow exception handling in `pdf_utils.py` where errors are known, with skipped PDF structures
     logged rather than silently dropped, and the unused `count_page_images` removed.
+- **EE without Reflection (Oct 2026):** at the user's request, EE marking covers criteria A–D
+  only (26 marks). The Reflection descriptors were removed from the rubric file and prompts, the
+  EE pipeline became `ee_evidence_audit_v2`, and the UI and downloads warn that Reflection is not
+  marked.
+- **Suggestions for improvement (Oct 2026):** after each final decision, a separate call writes
+  concise, page-cited, mark-free suggestions for the student, shown below the reports, downloadable
+  on their own and appended to the bundle.
 - **Dropped:** "Fix dataclass Exception inheritance". `LLMError` has an explicit `__init__`, and
   `str(PdfExtractionError("msg"))` already returns the message.

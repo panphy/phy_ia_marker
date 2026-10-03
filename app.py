@@ -12,6 +12,7 @@ from streamlit.errors import StreamlitSecretNotFoundError
 from app_utils import (
     ASSESSMENT_TYPES,
     IA,
+    SUGGESTIONS_PROMPT_FILE,
     AssessmentType,
     LoginThrottle,
     apply_prompt_qa,
@@ -20,6 +21,7 @@ from app_utils import (
     build_combined_report,
     build_evaluation_record,
     build_page_evidence_index,
+    build_suggestions_document,
     extract_report_scores,
     human_review_reason,
     moderation_reasons,
@@ -30,6 +32,7 @@ from app_utils import (
     report_validation_issues,
     scan_injection_phrases,
     split_pages,
+    suggestions_validation_issues,
     unverified_quotes,
 )
 from llm_utils import (
@@ -94,6 +97,8 @@ PROMPTS = {
     key: tuple(load_prompt(filename) for filename in assessment.prompt_files)
     for key, assessment in ASSESSMENT_TYPES.items()
 }
+# Student-facing suggestions, written after the final decision for either assessment type.
+SUGGESTIONS_PROMPT = load_prompt(SUGGESTIONS_PROMPT_FILE)
 
 
 def current_assessment() -> AssessmentType:
@@ -556,7 +561,7 @@ st.markdown(
         <h1>Physics IA &amp; EE Review</h1>
       </div>
       <div class="app-header-meta">
-        <span class="app-pill">IA 24 marks · EE 30 marks</span>
+        <span class="app-pill">IA 24 marks · EE 26 marks (A–D)</span>
         <span class="app-pill">OCR + visual coverage checks</span>
         <span class="app-pill">Responses not stored</span>
       </div>
@@ -706,6 +711,10 @@ if "examiner2_report" not in st.session_state:
     st.session_state.examiner2_report = ""
 if "moderator_report" not in st.session_state:
     st.session_state.moderator_report = ""
+if "suggestions_report" not in st.session_state:
+    st.session_state.suggestions_report = ""
+if "suggestions_error" not in st.session_state:
+    st.session_state.suggestions_error = ""
 if "debug_info" not in st.session_state:
     st.session_state.debug_info = {}
 if "doc_cache_key" not in st.session_state:
@@ -756,10 +765,16 @@ if "assessment_key" not in st.session_state:
     st.session_state.assessment_key = None
 
 
+def clear_suggestions() -> None:
+    st.session_state.suggestions_report = ""
+    st.session_state.suggestions_error = ""
+
+
 def reset_reports() -> None:
     st.session_state.examiner1_report = ""
     st.session_state.examiner2_report = ""
     st.session_state.moderator_report = ""
+    clear_suggestions()
     st.session_state.debug_info = {}
     st.session_state.doc_cache_key = None
     st.session_state.ia_coverage_report = ""
@@ -1222,6 +1237,52 @@ def run_chief_moderation(client: OpenAI, model: str, ia_ready: AIResult, reasons
     return report
 
 
+def run_suggestions(client: OpenAI, model: str, ia_ready: AIResult) -> str:
+    assessment = current_assessment()
+    prompt = SUGGESTIONS_PROMPT.format(
+        work_name=assessment.short_name,
+        rubric_text=st.session_state.criteria_text,
+        evidence_index=st.session_state.ia_evidence_index,
+        ia_text=ia_ready.text,
+        final_report=st.session_state.moderator_report,
+        criterion_headings="\n".join(f"- `### {name}`" for name in assessment.names),
+        digest_citation_guidance=build_digest_citation_guidance(ia_ready.used_digest),
+    )
+    report = call_llm(
+        client,
+        model=model,
+        instructions=(
+            f"Write concise, evidence-based, actionable suggestions for improving a student's IB Physics "
+            f"{assessment.short_name} draft, citing PDF pages and never stating marks. Return only the requested Markdown. "
+            f"{ANTI_INJECTION_INSTRUCTIONS} Original attached PDF visuals are source evidence."
+        ),
+        user_input=prompt,
+        source_images=st.session_state.ia_source_images,
+        usage_stage="suggestions",
+        on_usage=record_model_usage,
+    )
+    issues = (
+        suggestions_validation_issues(report, ia_ready.used_digest, assessment)
+        + report_page_issues(report, st.session_state.debug_info["ia_pages"])
+    )
+    if issues:
+        raise LLMError(
+            user_message=f"Suggestions for improvement need another run: {' '.join(issues)}",
+            debug_info={"error_type": "incomplete_report", "stage": "Suggestions", "issues": issues},
+        )
+    return report
+
+
+def generate_suggestions(client: OpenAI, model: str, ia_ready: AIResult) -> None:
+    """Write suggestions after a final decision; a failure here keeps the marks and can be retried."""
+    clear_suggestions()
+    try:
+        st.session_state.suggestions_report = run_suggestions(client, model, ia_ready)
+    except LLMError as exc:
+        record_llm_error("suggestions", exc)
+        st.session_state.suggestions_error = exc.user_message
+
+
 @st.cache_data(show_spinner=False, max_entries=4)
 def upload_requires_password(file_bytes: bytes) -> bool:
     return pdf_requires_password(file_bytes)
@@ -1243,11 +1304,8 @@ with workspace_left:
             help="Choose the rubric to mark against before running the assessment.",
         )
         if assessment_choice == "ee":
-            st.caption(
-                "Extended essay: 5 criteria, 30 marks. Append the student's Reflection and Progress Form "
-                "(RPF) to the same PDF so Reflection can be marked; without it Reflection is marked 0 "
-                "and the result is flagged for teacher review."
-            )
+            st.caption("Extended essay: criteria A–D, 26 marks.")
+            st.warning(ASSESSMENT_TYPES["ee"].marking_notice, icon="⚠️")
         elif assessment_choice == "ia":
             st.caption("Internal assessment: 4 criteria, 24 marks.")
         st.caption("Upload one PDF. Selectable text gives the strongest evidence trail; OCR handles scans.")
@@ -1293,6 +1351,7 @@ with workspace_right:
               <li><b>1</b><span><strong>Primary marker</strong> applies the IA or EE rubric criteria</span></li>
               <li><b>2</b><span><strong>Evidence auditor</strong> checks claims, calculations and cited pages</span></li>
               <li><b>3</b><span><strong>Chief Moderator</strong> resolves disagreements or evidence gaps</span></li>
+              <li><b>4</b><span><strong>Suggestions</strong> for the student, page-cited and without marks</span></li>
             </ul>
             """,
             unsafe_allow_html=True,
@@ -1360,7 +1419,7 @@ with st.expander("Advanced · run or repeat one stage"):
         or not assessment_choice
         or (needs_pdf_password and not pdf_password)
     )
-    columns = st.columns(3, gap="small")
+    columns = st.columns(4, gap="small")
     with columns[0]:
         run_examiner1 = st.button(
             "Run primary mark",
@@ -1379,6 +1438,13 @@ with st.expander("Advanced · run or repeat one stage"):
             disabled=stage_disabled or not reports_ready,
             width="stretch",
         )
+    with columns[3]:
+        run_suggestions_stage = st.button(
+            "Write suggestions",
+            disabled=stage_disabled or not st.session_state.moderator_report,
+            help="Suggestions for improvement, to send to the student before the final submission.",
+            width="stretch",
+        )
 
 selected_action = None
 if run_full:
@@ -1389,8 +1455,13 @@ elif run_examiner2:
     selected_action = "examiner2"
 elif run_moderator:
     selected_action = "moderator"
+elif run_suggestions_stage:
+    selected_action = "suggestions"
 
 if selected_action:
+    if selected_action != "suggestions":
+        # Suggestions follow the final decision, so any marking rerun invalidates them.
+        clear_suggestions()
     if selected_action == "full":
         st.session_state.examiner1_report = ""
         st.session_state.examiner2_report = ""
@@ -1474,6 +1545,8 @@ if processing_action:
                     )
                     st.session_state.moderator_report = agreed
                     st.session_state.decision_mode = "audited agreement"
+                status.write("Writing suggestions for improvement for the student.")
+                generate_suggestions(client, model, ia_ready)
                 status.update(label="Assessment complete", state="complete", expanded=False)
         except (LLMError, ValueError) as exc:
             if isinstance(exc, LLMError):
@@ -1519,6 +1592,7 @@ if processing_action:
                     )
                     st.session_state.moderator_report = agreed
                     st.session_state.decision_mode = "audited agreement"
+                    generate_suggestions(client, model, ia_ready)
             except (LLMError, ValueError) as exc:
                 if isinstance(exc, LLMError):
                     record_llm_error("evidence_audit", exc)
@@ -1543,11 +1617,21 @@ if processing_action:
                     client, model, ia_ready, reasons
                 )
                 st.session_state.decision_mode = "moderated"
+                generate_suggestions(client, model, ia_ready)
             except LLMError as exc:
                 record_llm_error("chief_moderation", exc)
                 st.session_state.processing_error = exc.user_message
             else:
                 st.success("Chief Moderator decision generated.")
+            st.session_state.pending_action = None
+            st.session_state.is_processing = False
+            st.rerun()
+
+    if processing_action == "suggestions":
+        with st.spinner("Writing suggestions for improvement..."):
+            generate_suggestions(client, model, ia_ready)
+            if st.session_state.suggestions_error:
+                st.session_state.processing_error = st.session_state.suggestions_error
             st.session_state.pending_action = None
             st.session_state.is_processing = False
             st.rerun()
@@ -1567,6 +1651,8 @@ if has_any_report:
     st.markdown("---")
     st.markdown('<div class="section-label">Assessment outcome</div>', unsafe_allow_html=True)
     st.markdown("## Results")
+    if assessment.marking_notice:
+        st.warning(assessment.marking_notice, icon="⚠️")
 
     decision_report = (
         st.session_state.moderator_report
@@ -1653,6 +1739,7 @@ if has_any_report:
         st.session_state.examiner2_report,
         st.session_state.moderator_report,
         assessment,
+        st.session_state.suggestions_report,
     )
     download_columns = st.columns([1, 1, 1])
     with download_columns[0]:
@@ -1667,7 +1754,9 @@ if has_any_report:
     with download_columns[1]:
         st.download_button(
             "Download final decision",
-            data=st.session_state.moderator_report,
+            data=(
+                f"> **Note:** {assessment.marking_notice}\n\n" if assessment.marking_notice else ""
+            ) + st.session_state.moderator_report,
             file_name=f"physics_{assessment.key}_final_decision.md",
             mime="text/markdown",
             disabled=inputs_disabled or not st.session_state.moderator_report,
@@ -1753,6 +1842,45 @@ if has_any_report:
                             caption=f"Page {source_image.page_number} · {source_image.name}",
                             width="stretch",
                         )
+
+    if st.session_state.moderator_report:
+        st.markdown("---")
+        st.markdown('<div class="section-label">For the student</div>', unsafe_allow_html=True)
+        st.markdown("## Suggestions for improvement")
+        if st.session_state.suggestions_report:
+            st.caption(
+                "Concise, page-cited actions to send to the student before the final submission. "
+                "They contain no marks. Check them against the draft before sending."
+            )
+            suggestion_quote_findings = quote_check_findings(
+                st.session_state.suggestions_report, st.session_state.moderator_report
+            )
+            if suggestion_quote_findings:
+                listed = "; ".join(
+                    f"“{str(item['quote'])[:120]}” (page {', '.join(map(str, item['pages']))})"
+                    for item in suggestion_quote_findings[:5]
+                )
+                st.warning(
+                    f"{len(suggestion_quote_findings)} quoted excerpt(s) were not found in the extracted text "
+                    f"of the cited pages. Check them before sending: {listed}"
+                )
+            with st.container(border=True):
+                st.markdown(st.session_state.suggestions_report)
+            st.download_button(
+                "Download suggestions for improvement",
+                data=build_suggestions_document(st.session_state.suggestions_report, assessment),
+                file_name=f"physics_{assessment.key}_suggestions_for_improvement.md",
+                mime="text/markdown",
+                disabled=inputs_disabled,
+                width="stretch",
+            )
+        elif st.session_state.suggestions_error:
+            st.warning(
+                f"{st.session_state.suggestions_error} The marks are unaffected. "
+                "Use **Advanced · run or repeat one stage → Write suggestions** to try again."
+            )
+        else:
+            st.info("Use **Advanced · run or repeat one stage → Write suggestions** to create them.")
 
     with st.expander("Technical details"):
         st.caption("Useful for troubleshooting extraction or model-call issues.")
