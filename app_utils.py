@@ -20,6 +20,8 @@ class AssessmentType:
     evidence_terms: tuple[tuple[str, str], ...]
     pipeline: str
     rubric_note: str
+    # Shown wherever marks are reported when the app marks fewer criteria than the official model.
+    marking_notice: str = ""
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -68,7 +70,6 @@ EE = AssessmentType(
         ("Knowledge and understanding", 6),
         ("Analysis and line of argument", 6),
         ("Discussion and evaluation", 8),
-        ("Reflection", 4),
     ),
     rubric_file="ib_phy_ee_criteria.md",
     prompt_files=("ee_primary_prompt.md", "ee_audit_prompt.md", "ee_moderator_prompt.md"),
@@ -77,10 +78,13 @@ EE = AssessmentType(
         ("Knowledge and understanding", r"theor|law|principle|equation|model|concept|background|literature|source|reference|bibliograph"),
         ("Analysis and line of argument", r"analys|data|graph|calculat|uncertaint|gradient|fit|trend|result|argument|therefore|suggests"),
         ("Discussion and evaluation", r"discuss|conclusion|significan|implication|limitation|strength|weakness|evaluat|reliab|validity|further research"),
-        ("Reflection", r"reflect|reflection and progress|RPF|I learned|I learnt|skill|challenge|changed|perspective|viva|supervisor"),
     ),
-    pipeline="ee_evidence_audit_v1",
+    pipeline="ee_evidence_audit_v2",
     rubric_note="Extended essay guide, first assessment 2027 · descriptors paraphrased, verify",
+    marking_notice=(
+        "Criterion E (Reflection, 4 marks) is not marked, because the Reflection and Progress Form "
+        "is usually unavailable. Marks cover criteria A–D only and are out of 26, not the official 30."
+    ),
 )
 
 ASSESSMENT_TYPES = {assessment.key: assessment for assessment in (IA, EE)}
@@ -101,7 +105,7 @@ INJECTION_DIRECTIVE_PATTERNS = {
     ),
     "perfect_score_command": (
         r"\b(?:give|award|assign|set|score|mark|grade)\b[^\n.!?]{0,80}"
-        r"\b(?:24\s*/\s*24|30\s*/\s*30|4\s*/\s*4|6\s*/\s*6|8\s*/\s*8)\b"
+        r"\b(?:24\s*/\s*24|26\s*/\s*26|30\s*/\s*30|4\s*/\s*4|6\s*/\s*6|8\s*/\s*8)\b"
     ),
     "role_spoofing": (
         r"\b(?:you are now|act as|assume the role of)\s+(?:the\s+)?"
@@ -846,18 +850,55 @@ def extract_report_scores(report: str, assessment: AssessmentType = IA) -> dict[
     return scores
 
 
+SUGGESTIONS_PROMPT_FILE = "suggestions_prompt.md"
+SUGGESTIONS_HEADING = "## Suggestions for improvement"
+
+
+def suggestions_validation_issues(
+    report: str, used_digest: bool, assessment: AssessmentType = IA
+) -> list[str]:
+    """Check the student-facing suggestions: one cited section per marked criterion, no marks."""
+    if not report.strip():
+        return ["The model returned no suggestions."]
+    issues = []
+    if not re.search(rf"^{re.escape(SUGGESTIONS_HEADING)}\s*$", report, flags=re.IGNORECASE | re.MULTILINE):
+        issues.append(f"The suggestions need the heading '{SUGGESTIONS_HEADING}'.")
+    missing = [name for name in assessment.names if _criterion_section(report, name) is None]
+    if missing:
+        issues.append("Missing suggestion sections: " + ", ".join(missing) + ".")
+    elif not report_has_expected_citations(report, used_digest, assessment):
+        issues.append("Each suggestion section needs a page or digest citation.")
+    if any(_heading_mark(report, name, maximum) is not None for name, maximum in assessment.criteria):
+        issues.append("Suggestions for the student must not state criterion marks.")
+    return issues
+
+
+def build_suggestions_document(report: str, assessment: AssessmentType = IA) -> str:
+    """The separately downloadable, student-facing suggestions."""
+    return (
+        f"# IB DP Physics {assessment.short_name}: suggestions for improvement\n\n"
+        "These suggestions are based on the draft you submitted. Page numbers refer to that PDF.\n\n"
+        + report.strip()
+        + "\n"
+    )
+
+
 def build_combined_report(
     examiner1_report: str,
     examiner2_report: str,
     moderator_report: str,
     assessment: AssessmentType = IA,
+    suggestions_report: str = "",
 ) -> str:
     """Create a single downloadable Markdown bundle from completed reports."""
     sections = [f"# IB DP Physics {assessment.short_name} assessment bundle"]
+    if assessment.marking_notice:
+        sections[0] += f"\n\n> **Note:** {assessment.marking_notice}"
     for title, report in (
         ("Primary mark — Experimentalist" if assessment is IA else "Primary mark", examiner1_report),
         ("Evidence audit", examiner2_report),
         ("Final decision", moderator_report),
+        ("Suggestions for improvement (for the student)", suggestions_report),
     ):
         if report.strip():
             sections.extend([f"## {title}", report.strip()])
