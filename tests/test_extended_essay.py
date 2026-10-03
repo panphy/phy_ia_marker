@@ -252,8 +252,11 @@ def test_suggestions_prompt_formats_and_keeps_its_safeguards() -> None:
         ia_text="--- Page 1 ---\nEssay",
         final_report="Final",
         criterion_headings="\n".join(f"- `### {name}`" for name in EE.names),
+        margin_notes_instructions="",
         digest_citation_guidance="",
     )
+    # Without annotated PDFs the suggestions call asks for no margin notes.
+    assert "## Margin notes" not in filled
     assert "### Discussion and evaluation" in filled
     assert "## Suggestions for improvement" in filled
     for phrase in ("untrusted", "Page N", "Do not mention marks", "do not write replacement text"):

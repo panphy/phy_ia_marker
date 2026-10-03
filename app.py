@@ -11,7 +11,9 @@ from streamlit.errors import StreamlitSecretNotFoundError
 
 from app_utils import (
     ASSESSMENT_TYPES,
+    EXAMINER_NOTES_PROMPT_FILE,
     IA,
+    STUDENT_NOTES_PROMPT_FILE,
     SUGGESTIONS_PROMPT_FILE,
     AssessmentType,
     LoginThrottle,
@@ -20,6 +22,7 @@ from app_utils import (
     build_candidate_evidence_ledger,
     build_combined_report,
     build_evaluation_record,
+    build_examiner_cover,
     build_page_evidence_index,
     build_suggestions_document,
     extract_report_scores,
@@ -31,6 +34,7 @@ from app_utils import (
     report_requests_human_review,
     report_validation_issues,
     scan_injection_phrases,
+    split_margin_notes,
     split_pages,
     suggestions_validation_issues,
     unverified_quotes,
@@ -46,6 +50,7 @@ from llm_utils import (
     maybe_digest,
     select_visuals_for_analysis,
 )
+from pdf_annotate import MarginNote, build_annotated_pdf
 from pdf_utils import (
     ExtractedVisual,
     PageExtractionDiagnostic,
@@ -63,8 +68,8 @@ from pdf_utils import (
 # Config
 # -------------------------
 APP_TITLE = "IB DP Physics IA & EE Marker"
-DEFAULT_MODEL = "gpt-6-sol"
-DEFAULT_VISION_MODEL = "gpt-6-sol"
+DEFAULT_MODEL = "gpt-6.1-sol"
+DEFAULT_VISION_MODEL = "gpt-6.1-sol"
 CRITERIA_DIR = Path(__file__).resolve().parent / "criteria"
 MAX_PASSWORD_ATTEMPTS = 5
 PASSWORD_ATTEMPT_WINDOW_SECONDS = 300
@@ -99,6 +104,9 @@ PROMPTS = {
 }
 # Student-facing suggestions, written after the final decision for either assessment type.
 SUGGESTIONS_PROMPT = load_prompt(SUGGESTIONS_PROMPT_FILE)
+# Margin notes for the examiner's annotated copy of the student PDF.
+EXAMINER_NOTES_PROMPT = load_prompt(EXAMINER_NOTES_PROMPT_FILE)
+STUDENT_NOTES_PROMPT = load_prompt(STUDENT_NOTES_PROMPT_FILE)
 
 
 def current_assessment() -> AssessmentType:
@@ -672,6 +680,15 @@ with st.sidebar:
         disabled=inputs_disabled,
         help="Optional extra model calls. Selected original visuals are supplied directly to the marker and auditor either way.",
     )
+    enable_annotated_pdfs = st.toggle(
+        "Create annotated PDFs",
+        value=False,
+        disabled=inputs_disabled,
+        help=(
+            "Annotated examiner and student copies of the PDF. Adds one model call per run "
+            "and longer suggestions output. Turning it on later only needs 'Write suggestions & notes'."
+        ),
+    )
     with st.expander("Advanced"):
         ocr_languages = get_ocr_languages()
         ocr_language = st.selectbox(
@@ -715,6 +732,14 @@ if "suggestions_report" not in st.session_state:
     st.session_state.suggestions_report = ""
 if "suggestions_error" not in st.session_state:
     st.session_state.suggestions_error = ""
+if "student_notes" not in st.session_state:
+    st.session_state.student_notes = []
+if "examiner_notes" not in st.session_state:
+    st.session_state.examiner_notes = []
+if "examiner_notes_error" not in st.session_state:
+    st.session_state.examiner_notes_error = ""
+if "margin_note_warnings" not in st.session_state:
+    st.session_state.margin_note_warnings = []
 if "debug_info" not in st.session_state:
     st.session_state.debug_info = {}
 if "doc_cache_key" not in st.session_state:
@@ -766,8 +791,13 @@ if "assessment_key" not in st.session_state:
 
 
 def clear_suggestions() -> None:
+    """Clear everything written after the final decision: suggestions and both sets of margin notes."""
     st.session_state.suggestions_report = ""
     st.session_state.suggestions_error = ""
+    st.session_state.student_notes = []
+    st.session_state.examiner_notes = []
+    st.session_state.examiner_notes_error = ""
+    st.session_state.margin_note_warnings = []
 
 
 def reset_reports() -> None:
@@ -1237,7 +1267,10 @@ def run_chief_moderation(client: OpenAI, model: str, ia_ready: AIResult, reasons
     return report
 
 
-def run_suggestions(client: OpenAI, model: str, ia_ready: AIResult) -> str:
+def run_suggestions(
+    client: OpenAI, model: str, ia_ready: AIResult, with_notes: bool
+) -> tuple[str, list[dict], list[str]]:
+    """Return the suggestions, the student's margin notes, and warnings about dropped notes."""
     assessment = current_assessment()
     prompt = SUGGESTIONS_PROMPT.format(
         work_name=assessment.short_name,
@@ -1246,9 +1279,14 @@ def run_suggestions(client: OpenAI, model: str, ia_ready: AIResult) -> str:
         ia_text=ia_ready.text,
         final_report=st.session_state.moderator_report,
         criterion_headings="\n".join(f"- `### {name}`" for name in assessment.names),
+        margin_notes_instructions=(
+            STUDENT_NOTES_PROMPT.format(criterion_list=", ".join(f'"{name}"' for name in assessment.names))
+            if with_notes
+            else ""
+        ),
         digest_citation_guidance=build_digest_citation_guidance(ia_ready.used_digest),
     )
-    report = call_llm(
+    response = call_llm(
         client,
         model=model,
         instructions=(
@@ -1261,6 +1299,8 @@ def run_suggestions(client: OpenAI, model: str, ia_ready: AIResult) -> str:
         usage_stage="suggestions",
         on_usage=record_model_usage,
     )
+    page_count = st.session_state.debug_info["ia_pages"]
+    report, notes, warnings = split_margin_notes(response, page_count, assessment, for_student=True)
     issues = (
         suggestions_validation_issues(report, ia_ready.used_digest, assessment)
         + report_page_issues(report, st.session_state.debug_info["ia_pages"])
@@ -1270,17 +1310,107 @@ def run_suggestions(client: OpenAI, model: str, ia_ready: AIResult) -> str:
             user_message=f"Suggestions for improvement need another run: {' '.join(issues)}",
             debug_info={"error_type": "incomplete_report", "stage": "Suggestions", "issues": issues},
         )
-    return report
+    if not with_notes:
+        return report, [], []
+    return report, notes, [f"Student copy: {warning}" for warning in warnings]
 
 
-def generate_suggestions(client: OpenAI, model: str, ia_ready: AIResult) -> None:
-    """Write suggestions after a final decision; a failure here keeps the marks and can be retried."""
+def run_examiner_notes(client: OpenAI, model: str, ia_ready: AIResult) -> tuple[list[dict], list[str]]:
+    assessment = current_assessment()
+    prompt = EXAMINER_NOTES_PROMPT.format(
+        work_name=assessment.short_name,
+        rubric_text=st.session_state.criteria_text,
+        evidence_index=st.session_state.ia_evidence_index,
+        ia_text=ia_ready.text,
+        final_report=st.session_state.moderator_report,
+        criterion_list=", ".join(f'"{name}"' for name in assessment.names),
+        digest_citation_guidance=build_digest_citation_guidance(ia_ready.used_digest),
+    )
+    response = call_llm(
+        client,
+        model=model,
+        instructions=(
+            f"Write short, page-anchored margin notes showing the evidence behind the final marks of an IB Physics "
+            f"{assessment.short_name}, quoting the student's text exactly. Return only the requested Markdown. "
+            f"{ANTI_INJECTION_INSTRUCTIONS} Original attached PDF visuals are source evidence."
+        ),
+        user_input=prompt,
+        source_images=st.session_state.ia_source_images,
+        usage_stage="examiner notes",
+        on_usage=record_model_usage,
+    )
+    _, notes, warnings = split_margin_notes(response, st.session_state.debug_info["ia_pages"], assessment)
+    if not notes:
+        raise LLMError(
+            user_message="The examiner's margin notes need another run: " + " ".join(warnings or ["none were usable."]),
+            debug_info={"error_type": "incomplete_report", "stage": "Examiner notes", "issues": warnings},
+        )
+    return notes, [f"Examiner copy: {warning}" for warning in warnings]
+
+
+def generate_suggestions(client: OpenAI, model: str, ia_ready: AIResult, with_notes: bool) -> None:
+    """Write the student suggestions after a final decision, and both sets of margin notes if requested.
+
+    The margin notes are optional to control cost. Failures here keep the marks and can be
+    retried from the Advanced panel.
+    """
     clear_suggestions()
+    warnings: list[str] = []
     try:
-        st.session_state.suggestions_report = run_suggestions(client, model, ia_ready)
+        report, notes, student_warnings = run_suggestions(client, model, ia_ready, with_notes)
+        st.session_state.suggestions_report = report
+        st.session_state.student_notes = notes
+        warnings += student_warnings
     except LLMError as exc:
         record_llm_error("suggestions", exc)
         st.session_state.suggestions_error = exc.user_message
+    if not with_notes:
+        return
+    try:
+        notes, examiner_warnings = run_examiner_notes(client, model, ia_ready)
+        st.session_state.examiner_notes = notes
+        warnings += examiner_warnings
+    except LLMError as exc:
+        record_llm_error("examiner_notes", exc)
+        st.session_state.examiner_notes_error = exc.user_message
+    st.session_state.margin_note_warnings = warnings
+
+
+@st.cache_data(show_spinner=False, max_entries=6)
+def annotated_pdf(
+    pdf_bytes: bytes, notes_json: str, cover_markdown: str, title: str, accent_hex: str, password: str
+) -> tuple[bytes, dict[str, int]]:
+    notes = [MarginNote(**note) for note in json.loads(notes_json)]
+    return build_annotated_pdf(
+        pdf_bytes, notes, cover_markdown, title=title, accent_hex=accent_hex, password=password or None
+    )
+
+
+def annotated_pdf_download(
+    label: str, notes: list[dict], cover_markdown: str, title: str, accent_hex: str, file_name: str
+) -> None:
+    """Offer an annotated copy of the uploaded PDF; a drawing failure never hides the marks."""
+    try:
+        data, stats = annotated_pdf(
+            ia_file.getvalue(), json.dumps(notes), cover_markdown, title, accent_hex, pdf_password
+        )
+    except Exception as exc:  # pypdf/ReportLab errors on unusual PDFs
+        st.session_state.debug_info.setdefault("annotation_errors", []).append(f"{title}: {exc!r}")
+        st.warning(f"The {title.lower()} PDF could not be created from this file.")
+        return
+    st.download_button(
+        label,
+        data=data,
+        file_name=file_name,
+        mime="application/pdf",
+        disabled=inputs_disabled,
+        width="stretch",
+    )
+    if stats["page_notes"]:
+        st.caption(
+            f"{stats['highlighted']} note(s) highlighted in the text; {stats['page_notes']} placed as page notes "
+            "because their quote was not found in the page's text layer."
+        )
 
 
 @st.cache_data(show_spinner=False, max_entries=4)
@@ -1440,9 +1570,9 @@ with st.expander("Advanced · run or repeat one stage"):
         )
     with columns[3]:
         run_suggestions_stage = st.button(
-            "Write suggestions",
+            "Write suggestions & notes",
             disabled=stage_disabled or not st.session_state.moderator_report,
-            help="Suggestions for improvement, to send to the student before the final submission.",
+            help="Suggestions for improvement and margin notes for both annotated PDFs.",
             width="stretch",
         )
 
@@ -1545,8 +1675,11 @@ if processing_action:
                     )
                     st.session_state.moderator_report = agreed
                     st.session_state.decision_mode = "audited agreement"
-                status.write("Writing suggestions for improvement for the student.")
-                generate_suggestions(client, model, ia_ready)
+                status.write(
+                    "Writing suggestions for the student"
+                    + (" and margin notes for both annotated copies." if enable_annotated_pdfs else ".")
+                )
+                generate_suggestions(client, model, ia_ready, enable_annotated_pdfs)
                 status.update(label="Assessment complete", state="complete", expanded=False)
         except (LLMError, ValueError) as exc:
             if isinstance(exc, LLMError):
@@ -1592,7 +1725,7 @@ if processing_action:
                     )
                     st.session_state.moderator_report = agreed
                     st.session_state.decision_mode = "audited agreement"
-                    generate_suggestions(client, model, ia_ready)
+                    generate_suggestions(client, model, ia_ready, enable_annotated_pdfs)
             except (LLMError, ValueError) as exc:
                 if isinstance(exc, LLMError):
                     record_llm_error("evidence_audit", exc)
@@ -1617,7 +1750,7 @@ if processing_action:
                     client, model, ia_ready, reasons
                 )
                 st.session_state.decision_mode = "moderated"
-                generate_suggestions(client, model, ia_ready)
+                generate_suggestions(client, model, ia_ready, enable_annotated_pdfs)
             except LLMError as exc:
                 record_llm_error("chief_moderation", exc)
                 st.session_state.processing_error = exc.user_message
@@ -1628,10 +1761,11 @@ if processing_action:
             st.rerun()
 
     if processing_action == "suggestions":
-        with st.spinner("Writing suggestions for improvement..."):
-            generate_suggestions(client, model, ia_ready)
-            if st.session_state.suggestions_error:
-                st.session_state.processing_error = st.session_state.suggestions_error
+        with st.spinner("Writing suggestions and margin notes..."):
+            generate_suggestions(client, model, ia_ready, enable_annotated_pdfs)
+            errors = [st.session_state.suggestions_error, st.session_state.examiner_notes_error]
+            if any(errors):
+                st.session_state.processing_error = " ".join(error for error in errors if error)
             st.session_state.pending_action = None
             st.session_state.is_processing = False
             st.rerun()
@@ -1773,6 +1907,29 @@ if has_any_report:
                 width="stretch",
             )
 
+    if st.session_state.moderator_report and ia_file:
+        if enable_annotated_pdfs and not st.session_state.examiner_notes and not st.session_state.examiner_notes_error:
+            st.caption(
+                "Annotated PDFs are on but were not created for this result. "
+                "Use **Advanced · run or repeat one stage → Write suggestions & notes** to create them."
+            )
+        if st.session_state.examiner_notes:
+            annotated_pdf_download(
+                "Download annotated marked paper (examiner PDF)",
+                st.session_state.examiner_notes,
+                build_examiner_cover(assessment, st.session_state.moderator_report, status_message),
+                "Examiner copy",
+                "#b8432f",
+                f"physics_{assessment.key}_annotated_examiner_copy.pdf",
+            )
+        elif st.session_state.examiner_notes_error:
+            st.warning(
+                f"{st.session_state.examiner_notes_error} The marks are unaffected. "
+                "Use **Advanced · run or repeat one stage → Write suggestions & notes** to try again."
+            )
+    for warning in st.session_state.margin_note_warnings:
+        st.caption(warning)
+
     final_tab, examiner1_tab, examiner2_tab, evidence_tab = st.tabs(
         ["Final decision", "Primary mark", "Evidence audit", "Source evidence"]
     )
@@ -1866,21 +2023,34 @@ if has_any_report:
                 )
             with st.container(border=True):
                 st.markdown(st.session_state.suggestions_report)
-            st.download_button(
-                "Download suggestions for improvement",
-                data=build_suggestions_document(st.session_state.suggestions_report, assessment),
-                file_name=f"physics_{assessment.key}_suggestions_for_improvement.md",
-                mime="text/markdown",
-                disabled=inputs_disabled,
-                width="stretch",
-            )
+            suggestion_columns = st.columns(2, gap="small")
+            with suggestion_columns[0]:
+                st.download_button(
+                    "Download suggestions (Markdown)",
+                    data=build_suggestions_document(st.session_state.suggestions_report, assessment),
+                    file_name=f"physics_{assessment.key}_suggestions_for_improvement.md",
+                    mime="text/markdown",
+                    disabled=inputs_disabled,
+                    width="stretch",
+                )
+            with suggestion_columns[1]:
+                if ia_file and st.session_state.student_notes:
+                    # The student copy shows the full suggestions list first, then the annotated draft.
+                    annotated_pdf_download(
+                        "Download annotated paper for the student (PDF)",
+                        st.session_state.student_notes,
+                        build_suggestions_document(st.session_state.suggestions_report, assessment),
+                        "Suggestions for improvement",
+                        "#3a7d44",
+                        f"physics_{assessment.key}_annotated_student_copy.pdf",
+                    )
         elif st.session_state.suggestions_error:
             st.warning(
                 f"{st.session_state.suggestions_error} The marks are unaffected. "
-                "Use **Advanced · run or repeat one stage → Write suggestions** to try again."
+                "Use **Advanced · run or repeat one stage → Write suggestions & notes** to try again."
             )
         else:
-            st.info("Use **Advanced · run or repeat one stage → Write suggestions** to create them.")
+            st.info("Use **Advanced · run or repeat one stage → Write suggestions & notes** to create them.")
 
     with st.expander("Technical details"):
         st.caption("Useful for troubleshooting extraction or model-call issues.")

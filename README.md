@@ -5,6 +5,7 @@ Modern Streamlit workspace for reviewing IB DP Physics scientific investigations
 ## Features
 - **Rubric-driven marking** for the IA (Research design, Data analysis, Conclusion, Evaluation; 24 marks) or the EE (Framework for the essay, Knowledge and understanding, Analysis and line of argument, Discussion and evaluation /8; 26 marks). The EE's Reflection criterion (/4, assessed from the Reflection and Progress Form) is not marked, so EE totals are out of 26 rather than the official 30; the app warns about this wherever EE marks appear.
 - **Suggestions for improvement**: after each final decision, a separate, page-cited list of concise actions for the student, without marks, to send back before the final submission.
+- **Annotated PDFs** (optional, sidebar toggle **Create annotated PDFs**, off by default to save cost): two annotated copies of the uploaded PDF. The **examiner copy** starts with the marks and the full final decision, then shows numbered margin notes linking highlighted evidence to each criterion. The **student copy** starts with the full suggestions list, then shows margin notes with actions to take, and never shows marks. Notes are drawn into a widened right margin, so every viewer shows and prints them.
 - **Evidence audit** checks the primary mark's claims, calculations, citations and rubric fit.
 - **Targeted moderation** for mark disagreements, audit concerns and source-coverage gaps; marks are never averaged.
 - **Deterministic report checks** (no model involved): criterion marks, page citations, stated totals, audit mark consistency, and quotes checked against the cited page.
@@ -37,17 +38,17 @@ Install `requirements.txt`, then run `streamlit run app.py` or `pytest tests/`. 
 
 ## Usage
 1. Open the app in your browser and enter the workspace password.
-2. Optionally adjust the sidebar settings: OCR, extra visual summaries, and (under **Advanced**) the OCR language.
+2. Optionally adjust the sidebar settings: OCR, extra visual summaries, annotated PDFs, and (under **Advanced**) the OCR language.
 3. Choose **Internal assessment (IA)** or **Extended essay (EE)**. Marking stays disabled until one is selected; changing it clears earlier reports.
 4. Upload the student PDF. If it is encrypted, enter its password in the field that appears. For an EE, no Reflection and Progress Form (RPF) is needed: Reflection is not marked and the total is out of 26.
 5. Select **Run complete assessment**. The progress tracker shows each stage; **Advanced · run or repeat one stage** reruns a single stage.
 6. Read the results banner first. It says whether the decision is ready or needs teacher review, and why.
 7. Review the final decision, primary mark, evidence audit and the **Source evidence** tab (page counts, coverage report, evidence index and the original visuals).
-8. Read the **Suggestions for improvement** below the reports. Check them against the draft, then download them separately to send to the student. If they fail, the marks are kept and **Advanced · run or repeat one stage → Write suggestions** retries them.
+8. Read the **Suggestions for improvement** below the reports. Check them against the draft, then download them (Markdown, or the annotated student PDF) to send to the student. Download the annotated examiner PDF from the row under the results. If the suggestions or notes fail, the marks are kept and **Advanced · run or repeat one stage → Write suggestions & notes** retries them.
 9. Download the final decision, the complete Markdown bundle (which ends with the suggestions), or (under **Technical details**) the scoring record for calibration.
 
 ## Configuration notes
-- **Models**: marking and visual analysis use `gpt-6-sol` through the Responses API.
+- **Models**: marking and visual analysis use `gpt-6.1-sol` (released September 2026) through the Responses API.
 - **Reasoning**: marking and adjudication use high reasoning effort; evidence-preserving digest work uses low effort.
 - **OCR**: toggle in the sidebar; choose an installed Tesseract language under **Advanced**.
 - **Digesting**: large PDFs are summarized into a structured digest before marking. The digest
@@ -71,7 +72,8 @@ Install `requirements.txt`, then run `streamlit run app.py` or `pytest tests/`. 
 6. Exact agreement with no evidence warning is finalized after audit, keeping any auditor note on overstated claims. A mark difference, audit concern, coverage gap, unverified quote, or use of a summarized IA goes to the Chief Moderator.
 7. If the Chief Moderator recommends human review, or quotes text that is not on the cited page, the app shows the marks as provisional and asks for teacher review.
 8. Suspected instructions aimed at the marker, or selected visuals that cannot be screened, prevent automatic sign-off. The app shows provisional marks and requires a teacher to inspect the original PDF.
-9. A final call (`prompts/suggestions_prompt.md`) turns the final decision into student-facing suggestions: top priorities, then 2–4 actions per criterion, each citing a page. The app checks that every criterion has a cited section, that cited pages exist and that no marks are stated, and warns about quotes not found on the cited page. Suggestions don't affect marks.
+9. A final call (`prompts/suggestions_prompt.md`) turns the final decision into student-facing suggestions: top priorities, then 2–4 actions per criterion, each citing a page. The app checks that every criterion has a cited section, that cited pages exist and that no marks are stated, and warns about quotes not found on the cited page. When annotated PDFs are on, the same call also returns the student's margin notes (`prompts/student_notes_prompt.md` is appended); notes mentioning marks or grades are dropped.
+10. When annotated PDFs are on, another call (`prompts/examiner_notes_prompt.md`) returns the examiner's margin notes. With the toggle off, neither set of notes is requested, so the run makes no extra call. For both PDFs (`pdf_annotate.py`), each note's quote is searched in the page's text layer and highlighted. A quote that isn't found (for example on an OCR-only page) becomes a page note, and the download says how many. An encrypted upload's annotated copies keep its password. None of this affects marks.
 
 ## Rubric currency
 The bundled IA rubric is sourced from the *Physics guide* (February 2023, updated November 2024), first assessment 2025. The IB's 2026 Physics examiner instructions continue to use the same four criteria and 24-mark structure. Current-session application notes are recorded in `criteria/ib_phy_ia_criteria.md`.

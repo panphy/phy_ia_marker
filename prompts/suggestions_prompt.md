@@ -63,3 +63,5 @@ Then one section per criterion, using these exact headings:
 Under each criterion heading give 2–4 bullet points. Start each with an action verb, e.g.
 "- **Add** an uncertainty for each processed value in the table on Page 4, ...". If a criterion
 is already strong, give one point on how to keep it secure and one small refinement.
+
+{margin_notes_instructions}

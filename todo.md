@@ -157,11 +157,14 @@ or improves, and escalation stays reasonable. Record both results here, and bump
   Human marks must cover criteria A–D only (Reflection is not marked). Phase 2 rules apply to the
   EE prompts.
 
-### [ ] 15. Evaluate the suggestions for improvement
+### [ ] 15. Evaluate the suggestions for improvement and the margin notes
 - **Why:** the student-facing suggestions (Oct 2026) are checked only for structure (a cited
   section per criterion, valid pages, no marks) and for unverified quotes.
 - **What:** on the evaluation runs, have a teacher rate a sample of suggestions as accurate,
   actionable and appropriately concise, and check that none writes content for the student.
+  For both annotated PDFs, record the share of notes placed as page notes (quote not found) and
+  check that highlights land on the right text. If page notes are common on OCR pages, locate
+  quotes with the OCR word boxes (`pytesseract.image_to_data`).
 
 ---
 
@@ -219,5 +222,9 @@ Details are in git history and the merged PRs.
 - **Suggestions for improvement (Oct 2026):** after each final decision, a separate call writes
   concise, page-cited, mark-free suggestions for the student, shown below the reports, downloadable
   on their own and appended to the bundle.
+- **Annotated PDFs and model update (Oct 2026):** examiner and student copies of the upload with
+  highlighted evidence and margin notes (`pdf_annotate.py`; optional via a sidebar toggle, off by
+  default, because it adds one model call per run). The
+  marking model changed from `gpt-6-sol` to `gpt-6.1-sol`.
 - **Dropped:** "Fix dataclass Exception inheritance". `LLMError` has an explicit `__init__`, and
   `str(PdfExtractionError("msg"))` already returns the message.
