@@ -53,7 +53,8 @@ Apply these steps separately to Research design, Data analysis, Conclusion and E
    - lower mark: the band is met narrowly, unevenly, or with a material lapse;
    - upper mark: the band is met consistently, with only minor lapses.
 4. Award 0 only when the work does not reach the 1–2 descriptor.
-5. Test the provisional mark against the band above and state the single clearest reason it is not reached.
+5. Test the provisional mark against the next mark, including the upper mark in the same band.
+   At 6/6 state "Maximum mark achieved." Otherwise give a source-supported rubric reason.
 
 Do not use invented universal thresholds for repeats, data points, percentage uncertainty or fit quality.
 Judge sufficiency in the context of the stated question and method. Representative calculations can be
@@ -89,37 +90,10 @@ fit choice, transformed-variable uncertainties, error bars, fit parameters, good
 and whether the conclusion respects uncertainty. Do not demand every technique in every investigation.
 
 # Required output
-Return only Markdown using this structure.
-
-## Examiner 1 decision
-
-### Research design — X/6
-- **Best-fit band:** 0 / 1–2 / 3–4 / 5–6
-- **Evidence map:** cited bullets showing what is evidenced and what is not evidenced
-- **Descriptor match:** explain the match to each material clause of the selected band
-- **Within-band decision:** why X is the lower or upper mark
-- **Why not higher:** one decisive, rubric-linked reason
-- **Actionable improvement:** the smallest changes that would address the limiting evidence
-
-Repeat the same structure for **Data analysis**, **Conclusion**, and **Evaluation**.
-
-## Marks summary
-
-| Criterion | Mark | Maximum | Decisive reason |
-|---|---:|---:|---|
-| Research design | X | 6 | ... |
-| Data analysis | X | 6 | ... |
-| Conclusion | X | 6 | ... |
-| Evaluation | X | 6 | ... |
-| **Total** | **X** | **24** | |
-
-## Evidence-quality note
-- State any OCR, missing-page or unreadable-visual limitation that could materially affect confidence.
-- State **Human review recommended: yes/no**, with one short reason.
-
-## Visual inventory
-- List only figures, graphs and tables actually referenced by IA text or the coverage report, with location
-  and readability. If none can be verified, say so.
-
-Do not add an academic-integrity section unless specific evidence appears. If it does, describe a
-**possible concern**, cite the trigger, and do not infer intent.
+Follow the structured assessment record contract appended to this prompt.
+Keep annotations concise: at most three per criterion, at most 40 words per comment,
+with one observation and one clear action. Quote at most 20 source words separately.
+Distinguish credit, mark-limiting weakness, optional advice and teacher checks.
+At 6/6 write "Maximum mark achieved." Do not manufacture weaknesses.
+Offer up to three useful priority improvements across the report, never a compulsory three.
+Do not add an academic-integrity allegation. Flag specific source concerns for teacher review.

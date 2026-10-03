@@ -210,8 +210,6 @@ def chunk_pages(raw_text: str, target_chars: int) -> list[dict[str, object]]:
 
 def _has_source_citation(text: str, used_digest: bool) -> bool:
     patterns = [r"\bPages?\s+\d+", r"---\s*Page\s+\d+\s*---"]
-    if used_digest:
-        patterns.append(r"\bCHUNK\s+\d+")
     return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
 
 
@@ -263,11 +261,24 @@ def report_validation_issues(report: str, used_digest: bool) -> list[str]:
         if heading and row:
             cells = row.group("cells").split("|")
             if len(cells) >= 3:
-                final = re.fullmatch(r"\s*\**([0-6])(?:\s*/\s*6)?\**\s*", cells[2])
+                # Primary: Mark, Maximum, Reason. Moderator: Primary, Audit, Final, Maximum, Reason.
+                value = cells[2] if len(cells) >= 6 else cells[0]
+                final = re.fullmatch(r"\s*\**([0-6])(?:\s*/\s*6)?\**\s*", value)
                 if final and int(heading.group(1)) != int(final.group(1)):
                     issues.append(f"{criterion} heading and final table mark disagree.")
     if not report_has_expected_citations(report, used_digest):
         issues.append("Each criterion needs a page or digest citation.")
+    scores = extract_report_scores(report)
+    if len(scores) == 4:
+        for value in re.findall(r"(?i)\bTotal\**\s*:\**\s*(\d+)\s*/\s*24", report):
+            if int(value) != sum(scores.values()):
+                issues.append("Written total disagrees with criterion marks.")
+        for row in re.findall(r"(?im)^\|\s*\**Total\**\s*\|([^\n]+)", report):
+            cells = row.split("|")
+            value = cells[2] if len(cells) >= 6 else cells[0]
+            match = re.fullmatch(r"\s*\**(\d+)\**\s*", value)
+            if match and int(match.group(1)) != sum(scores.values()):
+                issues.append("Table total disagrees with criterion marks.")
     return issues
 
 
@@ -282,8 +293,15 @@ def report_cited_pages(report: str) -> set[int]:
 
 
 def report_page_issues(report: str, page_count: int) -> list[str]:
-    invalid = sorted(page for page in report_cited_pages(report) if page < 1 or page > page_count)
-    return [f"Citations refer to pages outside this PDF: {', '.join(map(str, invalid))}."] if invalid else []
+    issues = []
+    for match in re.finditer(r"\bPages?\s+(\d+)(?:\s*[-–—]\s*(\d+))?", report, re.IGNORECASE):
+        start = int(match.group(1))
+        end = int(match.group(2)) if match.group(2) else start
+        if not 1 <= start <= end <= page_count:
+            issues.append(f"Invalid PDF page citation: {match.group(0)}.")
+    if re.search(r"\bCHUNK\s+\d+", report, re.IGNORECASE):
+        issues.append("Digest chunks are navigation only; cite verified original PDF pages.")
+    return issues
 
 
 def audit_requests_review(report: str) -> bool:
@@ -427,7 +445,7 @@ def build_evaluation_record(
     )
     return {
         "case_id": case_id,
-        "pipeline": "evidence_audit_v1",
+        "pipeline": "source_anchored_v2",
         "model": model,
         "primary_marks": extract_report_scores(primary_report),
         "audit_marks": extract_report_scores(audit_report),
@@ -450,7 +468,7 @@ def build_model_input(user_input: str, source_images: Iterable[object]) -> str |
     for image in images:
         page = int(getattr(image, "page_number"))
         data = bytes(getattr(image, "png_data"))
-        content.append({"type": "input_text", "text": f"Original PDF visual from Page {page}."})
+        content.append({"type": "input_text", "text": f"Original PDF visual from Page {page}. Visual ID: p{page}:{getattr(image, 'name', 'visual')}."})
         content.append(
             {
                 "type": "input_image",

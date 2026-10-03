@@ -67,36 +67,10 @@ Never invent a value, source location or figure label. Keep visual-analysis hint
 {digest_citation_guidance}
 
 # Required output
-Return only Markdown in this structure:
-
-## Final decision
-- **Total:** X/24
-- **Human review recommended:** yes/no — reason
-- **Overall rationale:** one concise paragraph
-
-## Criterion adjudication
-
-### Research design — X/6
-- **Primary mark:** X/6
-- **Audited recommendation:** X/6
-- **Verified evidence:** cited bullets
-- **Best-fit decision:** band and within-band reasoning
-- **Reconciliation:** accepted/rejected claims and why
-- **Why not higher:** one decisive rubric-linked reason
-
-Repeat the same structure for **Data analysis**, **Conclusion**, and **Evaluation**.
-
-## Final marks
-| Criterion | Primary | Audit | Final | Maximum | Decisive evidence |
-|---|---:|---:|---:|---:|---|
-| Research design | X | X | X | 6 | ... |
-| Data analysis | X | X | X | 6 | ... |
-| Conclusion | X | X | X | 6 | ... |
-| Evaluation | X | X | X | 6 | ... |
-| **Total** | **X** | **X** | **X** | **24** | |
-
-## Priority feedback
-- Give the three highest-impact rubric-linked improvements.
-
-## Evidence quality
-- Explain any source limitation that affects confidence or needs teacher inspection.
+Follow the structured assessment record contract appended to this prompt.
+Keep annotations concise: at most three per criterion, at most 40 words per comment,
+with one observation and one clear action. Quote at most 20 source words separately.
+Distinguish credit, mark-limiting weakness, optional advice and teacher checks.
+At 6/6 write "Maximum mark achieved." Do not manufacture weaknesses.
+Offer up to three useful priority improvements across the report, never a compulsory three.
+Do not add an academic-integrity allegation. Flag specific source concerns for teacher review.

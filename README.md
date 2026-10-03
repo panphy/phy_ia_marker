@@ -7,16 +7,20 @@ Modern Streamlit workspace for reviewing IB DP Physics scientific investigations
 - **Evidence audit** checks the primary mark's claims, calculations, citations and rubric fit.
 - **Targeted moderation** for mark disagreements, audit concerns and source-coverage gaps; marks are never averaged.
 - **PDF text extraction + OCR fallback** for scanned documents, with per-page diagnostics.
-- **Digest mode** for large IAs to fit within model context limits (auto-triggers over a size threshold).
+- **Digest navigation** for large IAs: retrieves original pages before marking; omitted pages keep the result provisional.
 - **Original PDF visuals supplied directly to marking calls**, with source-page labels and a reviewable preview.
 - **Coverage reporting** that flags missing text, OCR confidence, and unresolved figure/table labels.
 - **Instruction screening** that withholds likely marker-directed text or visuals and requires teacher review of flagged IAs.
-- **One-click complete assessment**, stage-by-stage reruns, score cards and downloadable Markdown reports.
+- **Validated assessment records** with centrally calculated totals, exact source-quote checks, per-visual readability checks and one bounded repair attempt.
+- **Concise annotations**: up to three per criterion, each at most 40 words plus a source quote of at most 20 words. Credit, limitations, optional advice and teacher checks are distinct.
+- **Source navigation and annotated PDF downloads**: jump to a cited page; exact unique text matches are highlighted. Visuals, scans and ambiguous text receive page notes instead of guessed highlights.
+- **One-click complete assessment**, stage-by-stage reruns, score cards and downloadable Markdown reports. Unresolved evidence gaps remain provisional after moderation.
 - **Password gate + cooldown** to reduce unauthorized access attempts.
 
 ## Repository layout
 - `app.py` — Streamlit UI, extraction flow, OpenAI calls, and report generation.
 - `app_utils.py` — prompt QA helpers, page chunking, and citation validation.
+- `assessment.py` — structured record validation, concise comments, source selection and report rendering.
 - `pdf_utils.py` — PDF parsing, OCR, and visual extraction helpers.
 - `criteria/ib_phy_ia_criteria.md` — rubric content used in prompts.
 - `prompts/` — prompt templates for the primary marker, evidence auditor and moderator.
@@ -34,16 +38,15 @@ Install `requirements.txt`, then run `streamlit run app.py` or `pytest tests/`. 
 2. Enter the app password.
 3. Upload a student IA PDF.
 4. Select **Run complete assessment**.
-5. Review the final decision, evidence audit and original source visuals.
-6. Download the final decision or the complete Markdown bundle.
+5. Review the concise feedback; select **View Page** to inspect the cited source. Expand **Teacher view** for marking rationale.
+6. Resolve any teacher checks before using provisional marks. Review the evidence audit and per-visual coverage.
+7. Download the decision, complete Markdown bundle, or annotated IA. PDF comments can be opened in a PDF reader; encrypted uploads retain their password on export.
 
 ## Configuration notes
 - **Models**: marking and visual analysis use `gpt-6-sol` through the Responses API.
 - **Reasoning**: marking and adjudication use high reasoning effort; evidence-preserving digest work uses low effort.
 - **OCR**: toggle in the sidebar; set OCR language via the text input.
-- **Digesting**: large PDFs are summarized into a structured digest before marking. The digest
-  preserves key evidence (numbers, units, uncertainties, figures/tables) and keeps page-range
-  labels so citations can still reference where evidence came from.
+- **Digesting**: above 180,000 extracted characters, a descriptive digest helps select original pages. Each marking stage receives up to 150,000 characters of whole original pages; it does not mark from the digest. Omitted pages are explicitly flagged for teacher review. Very large individual pages may exceed this budget and remain unverified.
 - **Visual analysis**: vector graphics are rasterized per page. Optional extra vision summaries are off by default; selected original visuals still go directly to marking calls.
 - **Storage**: `STORE_RESPONSES` is `False` by default for privacy.
 - **Password throttle**: the app shares a 5-minute cooldown across browser sessions in one server process after five failed attempts. Deployments with multiple worker processes need an external shared rate limiter.
@@ -51,11 +54,10 @@ Install `requirements.txt`, then run `streamlit run app.py` or `pytest tests/`. 
 
 ## How marking works
 1. The PDF is parsed page-by-page. OCR is attempted on pages with no selectable text and on image-heavy pages with only a short selectable header (if enabled).
-2. If the IA is too large, it is automatically summarized into a structured digest to fit the model
-   context. The digest keeps page-range labels so evidence can still be cited.
+2. If the IA is too large, a descriptive digest guides source-page retrieval. Only original page text and directly supplied visuals support annotations.
 3. The app builds a page index and exact candidate excerpts for rubric areas; these are navigation aids, not verified claims. A primary marker applies all four criteria and cites original pages.
-4. An evidence auditor checks the primary claims against the IA and attached original visuals.
-5. Exact agreement with no evidence warning is finalized after audit. A mark difference, audit concern or coverage gap goes to the Chief Moderator.
+4. An evidence auditor checks primary claims and missed strengths against original evidence. Audit and moderation can retrieve additional visuals and enlarged page renders for unresolved checks.
+5. Exact agreement with no evidence warning is finalized using the audited record. A mark difference, audit concern or coverage gap goes to the Chief Moderator. Moderation alone cannot clear a remaining source gap: it stays provisional. The UI honors the final human-review verdict.
 6. Suspected instructions aimed at the marker, or selected visuals that cannot be screened, prevent automatic sign-off. The app shows provisional marks and requires a teacher to inspect the original PDF.
 
 ## Rubric currency
@@ -71,12 +73,17 @@ The bundled rubric is sourced from the *Physics guide* (February 2023, updated N
 **Reliability notes**
 - Vector graphics are rasterized per page; low-resolution source PDFs can still limit chart/table readability.
 - OCR confidence warnings and “no-text” page flags are intended to prevent over-reliance on unreadable content.
-- Source-image selection is capped at six images per assessment. The auditor is instructed to request escalation if a necessary visual was not supplied or is unreadable.
+- Initial source-image selection is capped at six visuals, prioritizing data, graphs, uncertainty work and apparatus evidence. Each later stage can add up to six unsupplied visuals and up to six enlarged pages requested by earlier checks. Full-page renders cover all detected items on that page; a single extracted image does not. Uninspected items remain explicit review gaps, including uncaptioned items.
+- Each supplied visual receives a model-reported readable/unreadable/not-needed status. These are review aids, not independent verification.
+- Quote matching verifies source location, not scientific interpretation. Annotated PDF highlights require a unique literal text match; text reflow, OCR or repeated quotations can produce page notes instead. PDF output is built in memory without changing the original upload.
+- At 6/6 the report says “Maximum mark achieved.” Optional enrichment never counts as a reason to withhold marks.
 - Instruction screening is heuristic. It can miss disguised or poorly extracted text, so all marks still need a check against the original IA before use.
 
 ## Calibration against human marks
 
-The **Technical details** panel can download a scoring record containing marks, route, model usage and a PDF-derived case ID, without the student's PDF or report text. Add `human_marks` for each of the four criteria and optionally `human_review_required` (a Boolean) to each record. Save one JSON object per line in a JSONL file, then run `python eval_marking.py records.jsonl`. Keep the human marks blind to the app's result where possible. The comparison reports criterion and total mark error, within-one-mark rates, human-review recall and average API usage. Use the same IAs to compare this workflow with any previous or alternative pipeline; no quality claim should be inferred until such a set is evaluated.
+The **Technical details** panel can download a scoring record containing marks, route, model usage and a PDF-derived case ID, without the student's PDF or report text. Add `human_marks` for each of the four criteria and optionally `human_review_required` (a Boolean) to each record. Save one JSON object per line in a JSONL file, then run `python eval_marking.py records.jsonl`. Keep the human marks blind to the app's result where possible. The comparison reports criterion and total mark error, signed bias (positive means overmarking), within-one-mark rates, human-review recall and average API usage. Paired stage comparisons measure changes in criterion error after audit and moderation; negative change means improvement. Repeated runs of the same case, model and configuration report criterion variation and total-mark range. Use the same IAs to compare this workflow with any previous or alternative pipeline; no quality claim should be inferred until such a set is evaluated.
+
+For teacher evaluation of annotations, optionally add `annotation_reviews`, a list with Boolean `citation_correct`, `supported`, and `actionable` labels (omit nonapplicable labels). Add `missed_strengths_count` as a nonnegative integer for a reviewed case. These labels must come from a teacher, not the marking model. The evaluator reports rates with their denominators and missing-strength counts. See [calibration guide](CALIBRATION.md) for the evaluation protocol.
 
 ## Troubleshooting
 - **No extractable text**: enable OCR or verify your PDF isn’t image-only.

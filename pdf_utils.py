@@ -45,6 +45,8 @@ class SourceImage:
     png_data: bytes
     captions: tuple[str, ...] = ()
 
+    covers_page: bool = False
+
 
 def prepare_source_images(visuals: list[ExtractedVisual]) -> list[SourceImage]:
     """Normalize selected PDF visuals for direct inspection by marking models."""
@@ -63,7 +65,7 @@ def prepare_source_images(visuals: list[ExtractedVisual]) -> list[SourceImage]:
                 image.convert("RGB").save(output, format="PNG")
         except (OSError, ValueError):
             continue
-        prepared.append(SourceImage(visual.page_number, visual.name, output.getvalue(), visual.captions))
+        prepared.append(SourceImage(visual.page_number, visual.name, output.getvalue(), visual.captions, visual.kind == "vector"))
         if visual.kind == "vector":
             rendered_vector_pages.add(visual.page_number)
     return prepared
@@ -453,3 +455,86 @@ def extract_pdf_text(
             )
         )
     return "\n".join(chunks).strip(), pages, ocr_pages, diagnostics, visuals
+
+
+def _quote_rectangles(text_page, quote: str) -> list[tuple]:
+    """Anchor only a unique literal text match; ambiguous/OCR-only text gets a page note."""
+    if not quote.strip():
+        return []
+    search = text_page.search(quote, match_case=True)
+    try:
+        first = search.get_next()
+        if first is None or search.get_next() is not None:
+            return []
+        index, count = first
+        return [text_page.get_rect(i) for i in range(text_page.count_rects(index, count))]
+    finally:
+        search.close()
+
+
+def annotate_pdf(file_bytes: bytes, record: dict, pdf_password: str | None = None) -> tuple[bytes, list[dict]]:
+    """Add concise native comments/highlights in memory; never guess text positions.
+
+    Visual/OCR/ambiguous anchors get labelled page notes. Return an anchor manifest for
+    the UI. The original upload is unchanged and encrypted input stays encrypted.
+    """
+    from pypdf import PdfWriter
+    from pypdf.annotations import Highlight, Text
+    from pypdf.generic import ArrayObject, FloatObject, NameObject, TextStringObject
+    from assessment import annotation_comment
+
+    reader = PdfReader(io.BytesIO(file_bytes))
+    encrypted = reader.is_encrypted
+    if encrypted and not reader.decrypt(pdf_password or ''):
+        raise PdfPasswordRequiredError('Enter the PDF password to export annotations.')
+    writer = PdfWriter()
+    for page in reader.pages:
+        writer.add_page(page)
+    colors = {'credit': '21a179', 'limitation': 'f2b134', 'advice': '459cdb', 'check': 'd96a6a'}
+    manifest = []
+    with pdfium.PdfDocument(file_bytes, password=pdf_password or None) as document:
+        for criterion in record['criteria']:
+            for a in criterion['annotations']:
+                number = a['page']
+                page = document[number - 1]
+                text_page = page.get_textpage()
+                try:
+                    rectangles = _quote_rectangles(text_page, a['quote'])
+                finally:
+                    text_page.close()
+                    page.close()
+                title = f'{criterion["name"]} | {a["kind"].title()}'
+                comment = annotation_comment(a)
+                if record['review_required']:
+                    title = 'Provisional | ' + title
+                if rectangles:
+                    left = min(r[0] for r in rectangles)
+                    bottom = min(r[1] for r in rectangles)
+                    right = max(r[2] for r in rectangles)
+                    top = max(r[3] for r in rectangles)
+                    quads = ArrayObject([FloatObject(n) for l, b, r, t in rectangles
+                                         for n in (l, t, r, t, l, b, r, b)])
+                    annotation = Highlight(rect=(left, bottom, right, top), quad_points=quads,
+                                           highlight_color=colors[a['kind']], printing=True)
+                    annotation[NameObject("/CA")] = FloatObject(0.22)
+                    anchor = 'text highlight'
+                else:
+                    box = writer.pages[number - 1].cropbox
+                    count = sum(item['page'] == number and item['anchor'] == 'page note' for item in manifest)
+                    # Compact note icons along the upper edge; no false claim of an exact location.
+                    size = min(16, float(box.width) / 15, float(box.height) / 5)
+                    x = float(box.left) + size * (count + 1)
+                    y = float(box.top) - size * 2
+                    annotation = Text(rect=(x, y, x + size, y + size), text=comment, open=False)
+                    anchor = 'page note'
+                location = f'Page {number}' + (f' · {a["visual_id"]}' if a['visual_id'] else '')
+                annotation[NameObject('/Contents')] = TextStringObject(f'{title}\n{location}\n{comment}')
+                annotation[NameObject('/T')] = TextStringObject('Physics IA review')
+                writer.add_annotation(page_number=number - 1, annotation=annotation)
+                manifest.append({'criterion': criterion['name'], 'page': number, 'kind': a['kind'],
+                                 'anchor': anchor, 'comment': comment})
+    if encrypted:
+        writer.encrypt(pdf_password or '')
+    output = io.BytesIO()
+    writer.write(output)
+    return output.getvalue(), manifest

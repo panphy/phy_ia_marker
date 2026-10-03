@@ -81,3 +81,17 @@ Ensure the system can account for **all content in PDFs** (text, photos, diagram
 - [ ] **Add unit tests for core LLM functions**: `call_llm()`, `call_vision_llm()`, `analyze_visuals()`, `make_structured_digest()` have no test coverage.
 - [ ] **Create golden test cases**: Known IAs with expected mark ranges to validate marking consistency.
 - [ ] **Add inter-rater reliability testing**: Run multiple marking passes on same IA to measure variance.
+
+
+## Source-anchored assessment update
+
+- [x] Generate validated assessment records; calculate bands/totals and render reports centrally.
+- [x] Verify original-source quotes, visual IDs, page ranges and concise annotation limits.
+- [x] Keep unresolved evidence problems and model human-review verdicts visibly provisional.
+- [x] Retrieve original pages from digest navigation and additional visuals/enlarged pages during audit and moderation.
+- [x] Track per-item source coverage and model-reported visual readability.
+- [x] Add concise feedback, source-page navigation and native PDF highlights/comments.
+- [x] Allow maximum-mark decisions without invented weaknesses or compulsory improvements.
+- [x] Add offline Streamlit flow checks, PDF annotation checks and validation regressions.
+- [x] Add signed bias, paired stage comparisons, repeated-run stability and teacher-labelled annotation metrics.
+- [ ] Execute the qualified-human calibration protocol in `CALIBRATION.md`; synthetic automated tests do not measure marking accuracy.

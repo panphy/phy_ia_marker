@@ -296,7 +296,22 @@ def test_model_input_keeps_page_labels_with_source_images() -> None:
     assert payload[0]["role"] == "user"
     content = payload[0]["content"]
     assert content[0] == {"type": "input_text", "text": "Mark this IA"}
-    assert content[1] == {"type": "input_text", "text": "Original PDF visual from Page 2."}
+    assert content[1] == {"type": "input_text", "text": "Original PDF visual from Page 2. Visual ID: p2:visual."}
     assert content[2]["type"] == "input_image"
     assert content[2]["image_url"] == "data:image/png;base64,UE5H"
     assert content[2]["detail"] == "high"
+
+
+def test_primary_table_and_total_conflicts_are_rejected():
+    report = _complete_report(4)
+    report += '\n| Criterion | Mark | Maximum | Reason |\n| Research design | 2 | 6 | Page 1 |'
+    report += '\nTotal: 24/24'
+    issues = report_validation_issues(report, False)
+    assert any('table mark disagree' in issue for issue in issues)
+    assert any('total disagrees' in issue for issue in issues)
+
+
+def test_reversed_citations_and_digest_only_citations_rejected():
+    assert report_page_issues('Pages 99–1', 10)
+    assert report_page_issues('CHUNK 999', 10)
+    assert report_validation_issues(_complete_report(4).replace('Page 1', 'CHUNK 999'), True)
