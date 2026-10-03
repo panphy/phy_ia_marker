@@ -1,66 +1,54 @@
 # Repository guide
 
-This Streamlit app reviews IB DP Physics IAs against the four criteria in `criteria/ib_phy_ia_criteria.md` (24 marks total), and physics extended essays against criteria A–D of the 2027 EE model in `criteria/ib_phy_ee_criteria.md` (26 marks; Discussion and evaluation /8). EE criterion E, Reflection (/4), is deliberately not marked because the RPF is usually unavailable; the official total is 30. The user picks IA or EE before marking. `README.md` covers setup and user-facing behavior. `todo.md` lists open follow-up work, with a recommended order.
+A Streamlit app that marks IB DP Physics work. The user picks IA or EE first:
+
+- **IA**: four criteria in `criteria/ib_phy_ia_criteria.md`, /24.
+- **EE**: criteria A–D of the 2027 model in `criteria/ib_phy_ee_criteria.md`, /26. Criterion E, Reflection (/4), is deliberately not marked because the RPF is usually unavailable (official total /30).
+
+Other docs: `README.md` (setup, user-facing behavior), `todo.md` (the single list of open work, in phase order; start there), `CALIBRATION.md` (protocol for comparing against human marks).
 
 ## Where to work
 
-- `app.py`: UI, theme CSS, session state, assessment flow, stage runners, and report downloads. It runs the Streamlit page on import, so keep testable logic in the modules below.
-- `llm_utils.py`: OpenAI calls (`call_llm`, `call_vision_llm`), digesting, visual analysis, `STORE_RESPONSES` and the anti-injection instructions. Free of Streamlit; usage is reported through an `on_usage` callback.
-- `assessment.py`: validated IA assessment records, exact quote/visual checks, concise comments, original-page selection and Markdown rendering. EE retains the existing Markdown flow.
-- `app_utils.py`: the `AssessmentType` specs (`IA`, `EE`: criteria and maxima, rubric and prompt files, evidence terms, pipeline label), page evidence, prompt helpers, report validation and parsing, moderation routing, quote checks, and score exports. Parsers take the assessment type and default to `IA`.
-- `pdf_annotate.py`: the annotated examiner and student PDFs (ReportLab margin notes drawn as page content, quotes located with pypdfium2 text search, Markdown cover pages). Free of Streamlit.
-- `pdf_utils.py`: PDF text, OCR, encryption detection, and source-image extraction. `PageRenderer` renders each page once for both OCR and rasterization; skipped PDF structures are logged, not silently dropped.
-- `prompts/`: primary marker, evidence auditor, and Chief Moderator instructions for the IA, and `ee_*_prompt.md` equivalents for the EE. Both sets use the same `.format(...)` placeholders. `suggestions_prompt.md`, `student_notes_prompt.md` (appended to the suggestions prompt through `{margin_notes_instructions}`) and `examiner_notes_prompt.md` are shared by both and have their own placeholders (`work_name`, `final_report`, `criterion_headings`, `criterion_list`). Both return margin notes as JSON under `## Margin notes`, parsed by `split_margin_notes`.
-- `eval_marking.py`: offline comparison with human marks.
-- `.streamlit/config.toml`: theme colours and toolbar settings.
-- `tests/`: regression tests.
-- `todo.md`: the single list of open work. Start there.
+- `app.py`: UI, theme CSS, session state, stage runners, downloads. It runs the page on import, so keep testable logic elsewhere.
+- `app_utils.py`: `AssessmentType` specs (`IA`, `EE`: criteria, maxima, rubric/prompt files, `pipeline` label, `marking_notice`), report validation and parsing, moderation routing, quote checks, score exports. Parsers default to `IA`.
+- `assessment.py`: IA JSON assessment records (validation, exact quote/visual checks, annotation limits, bands/totals, Markdown rendering, original-page selection). EE still uses Markdown reports.
+- `llm_utils.py`: OpenAI calls, digesting, visual analysis, `STORE_RESPONSES`, anti-injection instructions. No Streamlit; usage goes through `on_usage`.
+- `pdf_utils.py`: text extraction, OCR, encryption, source images (`PageRenderer` renders each page once).
+- `pdf_annotate.py`: annotated examiner and student PDFs. No Streamlit.
+- `prompts/`: IA primary/audit/moderator prompts and `ee_*` equivalents (same placeholders); shared `suggestions_prompt.md`, `student_notes_prompt.md` (inserted via `{margin_notes_instructions}`) and `examiner_notes_prompt.md`. Margin notes come back as JSON under `## Margin notes` (`split_margin_notes`).
+- `eval_marking.py`: offline comparison with human marks. `tests/`: regression tests. `.streamlit/config.toml`: theme.
 
 ## Assessment flow
 
-1. Extract page-linked text and selected source visuals, using OCR when needed. Large IAs use a descriptive digest to retrieve original pages before marking; omitted originals keep marks provisional. EE retains digest-based marking with mandatory escalation.
-2. The primary marker applies the rubric. The evidence auditor checks its claims, citations and marks against the IA. IA stages return validated JSON records; `assessment.py` renders their reports and computes bands/totals. Annotations are at most 40 words, three per criterion; quotes are at most 20 words. Audit/moderation can retrieve additional visuals and enlarged pages.
-3. Deterministic checks run on every report (`app_utils.py`):
-   - each criterion has a mark and a page citation;
-   - cited pages exist in the PDF;
-   - any stated total equals the sum of the criterion marks;
-   - the audit's heading mark (`— audited X/6`) matches its `Audited mark recommendation` and its copy of the primary mark;
-   - quoted excerpts appear in the extracted text of the cited page.
-4. Exact agreement with no escalation reason produces an audited decision, which keeps any auditor note on overstated claims. Any of the following triggers Chief Moderator adjudication:
-   - a mark disagreement or audit concern;
-   - an evidence or coverage gap;
-   - an unverified quote;
-   - a summarised IA;
-   - a suspected injection.
+1. Extract page-linked text and source visuals (OCR when needed). Large IAs use a digest only to navigate to original pages; omitted originals keep marks provisional. EE marks from the digest with mandatory escalation.
+2. Primary marker → evidence auditor. IA stages return validated JSON records (annotations ≤40 words, ≤3 per criterion; quotes ≤20 words). Audit and moderation can fetch extra visuals and enlarged pages.
+3. Deterministic checks (`app_utils.py`): every criterion has a mark and page citation; cited pages exist; stated totals equal the sum; the audit's heading mark matches its recommendation and primary-mark copy; quotes appear on the cited page.
+4. Exact agreement with no escalation reason gives an audited decision. Disagreement, audit concerns, evidence/coverage gaps, unverified quotes, a summarised document or suspected injection go to the Chief Moderator. Never average marks.
+5. After a final decision, a suggestions call writes student-facing suggestions (validated by `suggestions_validation_issues`). With the sidebar **Create annotated PDFs** toggle on (off by default, for cost), it also writes student margin notes; IA examiner notes reuse the final record's annotations, EE examiner notes need one more call. Failures keep the marks and can be retried. Rerunning a marking stage clears suggestions and notes.
+6. Marks are shown as provisional for unresolved IA source gaps, a `Human review recommended` or missing verdict, suspected injection, or unverified quotes in the final decision.
 
-   Never average marks.
-5. After any final decision, a suggestions call writes student-facing suggestions for improvement (no marks, page-cited, validated by `suggestions_validation_issues`). When the sidebar's **Create annotated PDFs** toggle is on (off by default, to control cost), the same stage also writes student margin notes; IA examiner notes reuse validated assessment annotations, while EE examiner notes use a separate call; when it is off, no notes are requested and no extra call is made. A failure there keeps the marks and can be retried. Rerunning any marking stage clears the suggestions and notes.
-6. Unresolved IA source gaps are enforced independently of model verdicts and remain provisional. The Chief Moderator's `Human review recommended` verdict, missing verdicts, suspected injection, and unverified quotes in the final decision make the marks provisional in the UI.
-
-The three marking stages currently use `gpt-6.1-sol` (changed from `gpt-6-sol` in Oct 2026; scoring records carry the model, so compare runs by model as well as pipeline). Their distinct jobs matter more than different personas. Do not claim independent model agreement or improved accuracy without evaluation against qualified human marks. Do not change how the models mark (see Phase 2 in `todo.md`) until the evaluation set exists. This applies to the EE prompts too, once the EE rubric text is verified.
+All marking stages use `gpt-6.1-sol` (`DEFAULT_MODEL` in `app.py`; was `gpt-6-sol` before Oct 2026). Scoring records carry the model and pipeline, so compare runs by both. Don't claim improved accuracy or independent agreement without evaluation against qualified human marks, and don't change how the models mark (IA or EE) until the evaluation set exists (Phase 1 of `todo.md`).
 
 ## Invariants
 
-- Keep the rubric and app instructions separate from untrusted student content, extracted text, visual summaries, and model reports. Preserve prompt-injection defenses.
-- Treat original IA pages and supplied PDF visuals as evidence. Coverage diagnostics and optional vision summaries are aids, not independent proof. Flag unreadable or missing evidence rather than guessing.
-- Cite PDF pages for material marking claims. When you change prompts or output formats, keep report validation, page-range checks, the parsers (`extract_report_scores`, `report_stated_totals`, `audit_mark_issues`, `HUMAN_REVIEW_PATTERN`) and the "verbatim text only inside quotation marks" rule in step with them.
-- Missing or ambiguous model verdicts must fail safe: escalate, or require review.
-- Keep `STORE_RESPONSES = False` unless the user explicitly changes the privacy policy. Never commit API keys, passwords, student PDFs, reports containing student text, or human-mark files.
-- Respect Streamlit session-state dependencies: rerunning an earlier stage must invalidate later reports.
-- Bump the assessment type's `pipeline` value (in `app_utils.py`) whenever its marking flow changes, so evaluation results stay comparable.
-- Changing the IA/EE selection must reset reports (it is part of the settings key and the document cache key). Never mark EE work with the IA rubric or the reverse.
-- EE Reflection is not marked (the user's decision, Oct 2026): `EE.criteria` holds A–D only, totals are /26, and `EE.marking_notice` must be shown wherever EE marks appear (results, final-decision download, bundle). The EE descriptors are paraphrased until verified (see `todo.md`); don't present them as verbatim.
-- Suggestions for improvement and the student PDF go to students: they must never state marks, markbands or totals, must cite pages, and must not write replacement content for the student. Keep `STUDENT_NOTE_MARK_PATTERN` filtering student margin notes.
-- Annotated PDFs contain student work: offer them only as downloads, never store them, and re-encrypt them when the upload was encrypted. A note whose quote can't be found must become a page note, never be placed on unrelated text.
+- Keep rubric and app instructions separate from untrusted content (student text, extracted text, visual summaries, model reports). Preserve prompt-injection defenses.
+- Original pages and PDF visuals are evidence; coverage diagnostics and vision summaries are only aids. Flag unreadable or missing evidence rather than guessing.
+- Cite PDF pages for material claims. When prompts or output formats change, keep validation, page-range checks, the parsers (`extract_report_scores`, `report_stated_totals`, `audit_mark_issues`, `HUMAN_REVIEW_PATTERN`) and the "verbatim text only inside quotation marks" rule in step.
+- Missing or ambiguous model verdicts fail safe: escalate or require review.
+- Keep `STORE_RESPONSES = False` unless the user changes the privacy policy. Never commit API keys, student PDFs, reports with student text, or human-mark files.
+- Rerunning an earlier stage must invalidate later reports. Changing IA/EE resets reports (it is part of the settings and document cache keys); never mark one with the other's rubric.
+- Bump the type's `pipeline` value in `app_utils.py` whenever its marking flow changes.
+- EE: `EE.criteria` holds A–D only, totals are /26, and `EE.marking_notice` appears wherever EE marks do (results, final-decision download, bundle). The EE descriptors are paraphrased until verified (`todo.md`); don't present them as verbatim.
+- Suggestions and the student PDF go to students: no marks, markbands or totals (`STUDENT_NOTE_MARK_PATTERN` filters notes), page citations required, no replacement content written for the student.
+- Annotated PDFs contain student work: download only, never stored, re-encrypted if the upload was encrypted. A note whose quote can't be found becomes a page note, never placed on unrelated text.
 
 ## UI notes
 
-- Palette colours are defined twice and must match: `.streamlit/config.toml` and the CSS tokens on `:root` at the top of the UI section in `app.py`. The theme is locked to `base = "light"` because the CSS assumes it.
-- Custom CSS targets bordered containers through their `key=` classes (`.st-key-upload_card` etc.) and a few Streamlit `data-testid` values. Streamlit updates can rename test IDs, so smoke-check the UI after upgrading.
-- The header logo links to `PANPHY_URL` (https://panphy.app).
+- Palette colours live in `.streamlit/config.toml` and the `:root` CSS tokens in `app.py`; keep them matched. The theme is locked to `base = "light"`.
+- CSS targets containers by `key=` classes (`.st-key-upload_card` etc.) and some `data-testid` values, which Streamlit upgrades can rename: smoke-check the UI after upgrading.
 
 ## Before committing
 
-- Read the relevant implementation and prompt before editing. Keep template placeholders aligned with their `.format(...)` calls.
-- Run `pytest tests/` after code or prompt changes. For UI changes, also run a Streamlit smoke check when possible.
-- Update `README.md` when user-facing behavior, setup, or the assessment flow changes. Tick or add items in `todo.md` when follow-up work is done or discovered.
+- Keep prompt placeholders aligned with their `.format(...)` calls.
+- Run `pytest tests/`; for UI changes, also smoke-check Streamlit when possible.
+- Update `README.md` for user-facing or flow changes, and tick or add items in `todo.md`.
