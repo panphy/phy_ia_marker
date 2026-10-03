@@ -223,7 +223,8 @@ Details are in git history and the merged PRs.
   concise, page-cited, mark-free suggestions for the student, shown below the reports, downloadable
   on their own and appended to the bundle.
 - **Annotated PDFs and model update (Oct 2026):** examiner and student copies of the upload with
-  highlighted evidence and margin notes (`pdf_annotate.py`, one extra model call per run). The
+  highlighted evidence and margin notes (`pdf_annotate.py`; optional via a sidebar toggle, off by
+  default, because it adds one model call per run). The
   marking model changed from `gpt-6-sol` to `gpt-6.1-sol`.
 - **Dropped:** "Fix dataclass Exception inheritance". `LLMError` has an explicit `__init__`, and
   `str(PdfExtractionError("msg"))` already returns the message.

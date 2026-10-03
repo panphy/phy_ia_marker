@@ -158,3 +158,15 @@ def test_examiner_notes_prompt_formats() -> None:
     assert "## Margin notes" in filled
     assert '{"page": 3' in filled
     assert "untrusted" in filled
+
+
+def test_student_notes_prompt_is_appended_only_when_requested() -> None:
+    notes_block = (ROOT / "prompts" / "student_notes_prompt.md").read_text(encoding="utf-8").format(
+        criterion_list=", ".join(f'"{name}"' for name in IA.names)
+    )
+    assert "## Margin notes" in notes_block
+    assert '"Research design"' in notes_block
+    assert '{"page": 4' in notes_block
+    suggestions = (ROOT / "prompts" / "suggestions_prompt.md").read_text(encoding="utf-8")
+    assert "{margin_notes_instructions}" in suggestions
+    assert "## Margin notes" not in suggestions

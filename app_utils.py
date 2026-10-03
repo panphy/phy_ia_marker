@@ -875,6 +875,8 @@ def suggestions_validation_issues(
 
 
 EXAMINER_NOTES_PROMPT_FILE = "examiner_notes_prompt.md"
+# Appended to the suggestions prompt only when annotated PDFs are requested.
+STUDENT_NOTES_PROMPT_FILE = "student_notes_prompt.md"
 MARGIN_NOTES_HEADING = "## Margin notes"
 MAX_MARGIN_NOTES = 40
 # A note for the student must not reveal marks, markbands or grades.

@@ -13,6 +13,7 @@ from app_utils import (
     ASSESSMENT_TYPES,
     EXAMINER_NOTES_PROMPT_FILE,
     IA,
+    STUDENT_NOTES_PROMPT_FILE,
     SUGGESTIONS_PROMPT_FILE,
     AssessmentType,
     LoginThrottle,
@@ -105,6 +106,7 @@ PROMPTS = {
 SUGGESTIONS_PROMPT = load_prompt(SUGGESTIONS_PROMPT_FILE)
 # Margin notes for the examiner's annotated copy of the student PDF.
 EXAMINER_NOTES_PROMPT = load_prompt(EXAMINER_NOTES_PROMPT_FILE)
+STUDENT_NOTES_PROMPT = load_prompt(STUDENT_NOTES_PROMPT_FILE)
 
 
 def current_assessment() -> AssessmentType:
@@ -677,6 +679,15 @@ with st.sidebar:
         value=False,
         disabled=inputs_disabled,
         help="Optional extra model calls. Selected original visuals are supplied directly to the marker and auditor either way.",
+    )
+    enable_annotated_pdfs = st.toggle(
+        "Create annotated PDFs",
+        value=False,
+        disabled=inputs_disabled,
+        help=(
+            "Annotated examiner and student copies of the PDF. Adds one model call per run "
+            "and longer suggestions output. Turning it on later only needs 'Write suggestions & notes'."
+        ),
     )
     with st.expander("Advanced"):
         ocr_languages = get_ocr_languages()
@@ -1256,7 +1267,9 @@ def run_chief_moderation(client: OpenAI, model: str, ia_ready: AIResult, reasons
     return report
 
 
-def run_suggestions(client: OpenAI, model: str, ia_ready: AIResult) -> tuple[str, list[dict], list[str]]:
+def run_suggestions(
+    client: OpenAI, model: str, ia_ready: AIResult, with_notes: bool
+) -> tuple[str, list[dict], list[str]]:
     """Return the suggestions, the student's margin notes, and warnings about dropped notes."""
     assessment = current_assessment()
     prompt = SUGGESTIONS_PROMPT.format(
@@ -1266,7 +1279,11 @@ def run_suggestions(client: OpenAI, model: str, ia_ready: AIResult) -> tuple[str
         ia_text=ia_ready.text,
         final_report=st.session_state.moderator_report,
         criterion_headings="\n".join(f"- `### {name}`" for name in assessment.names),
-        criterion_list=", ".join(f'"{name}"' for name in assessment.names),
+        margin_notes_instructions=(
+            STUDENT_NOTES_PROMPT.format(criterion_list=", ".join(f'"{name}"' for name in assessment.names))
+            if with_notes
+            else ""
+        ),
         digest_citation_guidance=build_digest_citation_guidance(ia_ready.used_digest),
     )
     response = call_llm(
@@ -1293,6 +1310,8 @@ def run_suggestions(client: OpenAI, model: str, ia_ready: AIResult) -> tuple[str
             user_message=f"Suggestions for improvement need another run: {' '.join(issues)}",
             debug_info={"error_type": "incomplete_report", "stage": "Suggestions", "issues": issues},
         )
+    if not with_notes:
+        return report, [], []
     return report, notes, [f"Student copy: {warning}" for warning in warnings]
 
 
@@ -1329,21 +1348,24 @@ def run_examiner_notes(client: OpenAI, model: str, ia_ready: AIResult) -> tuple[
     return notes, [f"Examiner copy: {warning}" for warning in warnings]
 
 
-def generate_suggestions(client: OpenAI, model: str, ia_ready: AIResult) -> None:
-    """Write the student suggestions and both sets of margin notes after a final decision.
+def generate_suggestions(client: OpenAI, model: str, ia_ready: AIResult, with_notes: bool) -> None:
+    """Write the student suggestions after a final decision, and both sets of margin notes if requested.
 
-    Failures here keep the marks and can be retried from the Advanced panel.
+    The margin notes are optional to control cost. Failures here keep the marks and can be
+    retried from the Advanced panel.
     """
     clear_suggestions()
     warnings: list[str] = []
     try:
-        report, notes, student_warnings = run_suggestions(client, model, ia_ready)
+        report, notes, student_warnings = run_suggestions(client, model, ia_ready, with_notes)
         st.session_state.suggestions_report = report
         st.session_state.student_notes = notes
         warnings += student_warnings
     except LLMError as exc:
         record_llm_error("suggestions", exc)
         st.session_state.suggestions_error = exc.user_message
+    if not with_notes:
+        return
     try:
         notes, examiner_warnings = run_examiner_notes(client, model, ia_ready)
         st.session_state.examiner_notes = notes
@@ -1653,8 +1675,11 @@ if processing_action:
                     )
                     st.session_state.moderator_report = agreed
                     st.session_state.decision_mode = "audited agreement"
-                status.write("Writing suggestions for the student and margin notes for both annotated copies.")
-                generate_suggestions(client, model, ia_ready)
+                status.write(
+                    "Writing suggestions for the student"
+                    + (" and margin notes for both annotated copies." if enable_annotated_pdfs else ".")
+                )
+                generate_suggestions(client, model, ia_ready, enable_annotated_pdfs)
                 status.update(label="Assessment complete", state="complete", expanded=False)
         except (LLMError, ValueError) as exc:
             if isinstance(exc, LLMError):
@@ -1700,7 +1725,7 @@ if processing_action:
                     )
                     st.session_state.moderator_report = agreed
                     st.session_state.decision_mode = "audited agreement"
-                    generate_suggestions(client, model, ia_ready)
+                    generate_suggestions(client, model, ia_ready, enable_annotated_pdfs)
             except (LLMError, ValueError) as exc:
                 if isinstance(exc, LLMError):
                     record_llm_error("evidence_audit", exc)
@@ -1725,7 +1750,7 @@ if processing_action:
                     client, model, ia_ready, reasons
                 )
                 st.session_state.decision_mode = "moderated"
-                generate_suggestions(client, model, ia_ready)
+                generate_suggestions(client, model, ia_ready, enable_annotated_pdfs)
             except LLMError as exc:
                 record_llm_error("chief_moderation", exc)
                 st.session_state.processing_error = exc.user_message
@@ -1737,7 +1762,7 @@ if processing_action:
 
     if processing_action == "suggestions":
         with st.spinner("Writing suggestions and margin notes..."):
-            generate_suggestions(client, model, ia_ready)
+            generate_suggestions(client, model, ia_ready, enable_annotated_pdfs)
             errors = [st.session_state.suggestions_error, st.session_state.examiner_notes_error]
             if any(errors):
                 st.session_state.processing_error = " ".join(error for error in errors if error)
@@ -1883,6 +1908,11 @@ if has_any_report:
             )
 
     if st.session_state.moderator_report and ia_file:
+        if enable_annotated_pdfs and not st.session_state.examiner_notes and not st.session_state.examiner_notes_error:
+            st.caption(
+                "Annotated PDFs are on but were not created for this result. "
+                "Use **Advanced · run or repeat one stage → Write suggestions & notes** to create them."
+            )
         if st.session_state.examiner_notes:
             annotated_pdf_download(
                 "Download annotated marked paper (examiner PDF)",
@@ -2004,7 +2034,7 @@ if has_any_report:
                     width="stretch",
                 )
             with suggestion_columns[1]:
-                if ia_file:
+                if ia_file and st.session_state.student_notes:
                     # The student copy shows the full suggestions list first, then the annotated draft.
                     annotated_pdf_download(
                         "Download annotated paper for the student (PDF)",
