@@ -191,6 +191,8 @@ def render_record(record: dict, stage: str) -> str:
                   f'- **Best-fit decision:** Band {c["band"]}. {safe_markdown(c["best_fit"])} ({refs})',
                   f'- **Within-band decision:** {safe_markdown(c["within_band"])} ({refs})',
                   f'- **Why not higher:** {safe_markdown(c["why_not_higher"])} ({refs})']
+        if stage == 'Evidence audit':
+            lines.append(f'- **Audited mark recommendation:** {c["mark"]}/6')
         for a in c['annotations']:
             quote = f' “{safe_markdown(a["quote"])}” —' if a['quote'] else ''
             lines.append(f'- **{a["kind"].title()} · Page {a["page"]}:**{quote} {safe_markdown(annotation_comment(a))}')

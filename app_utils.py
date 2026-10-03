@@ -1,23 +1,98 @@
 import base64
+import json
 import re
 import threading
 import time
+from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Iterable
 
 
-CRITERION_NAMES = (
-    "Research design",
-    "Data analysis",
-    "Conclusion",
-    "Evaluation",
+@dataclass(frozen=True)
+class AssessmentType:
+    """One kind of student work, with its criteria, rubric and prompt files."""
+
+    key: str
+    label: str
+    short_name: str
+    criteria: tuple[tuple[str, int], ...]
+    rubric_file: str
+    prompt_files: tuple[str, str, str]  # primary marker, evidence auditor, Chief Moderator
+    evidence_terms: tuple[tuple[str, str], ...]
+    pipeline: str
+    rubric_note: str
+    # Shown wherever marks are reported when the app marks fewer criteria than the official model.
+    marking_notice: str = ""
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return tuple(name for name, _ in self.criteria)
+
+    @property
+    def total(self) -> int:
+        return sum(maximum for _, maximum in self.criteria)
+
+    def maximum(self, criterion: str) -> int:
+        return dict(self.criteria)[criterion]
+
+    @property
+    def count_word(self) -> str:
+        return {4: "four", 5: "five"}.get(len(self.criteria), str(len(self.criteria)))
+
+
+IA = AssessmentType(
+    key="ia",
+    label="Internal assessment (IA)",
+    short_name="IA",
+    criteria=(
+        ("Research design", 6),
+        ("Data analysis", 6),
+        ("Conclusion", 6),
+        ("Evaluation", 6),
+    ),
+    rubric_file="ib_phy_ia_criteria.md",
+    prompt_files=("examiner1_prompt.md", "examiner2_prompt.md", "moderator_prompt.md"),
+    evidence_terms=(
+        ("Research design", r"research question|independent variable|dependent variable|control variable|apparatus|method(?:ology)?|procedure|repeat|range|interval"),
+        ("Data analysis", r"raw data|processed data|uncertaint|error bar|gradient|slope|graph|fit|regress|calculation|significant figure"),
+        ("Conclusion", r"conclusion|result|hypothesis|theor|accepted value|agreement|discrepan|percentage difference"),
+        ("Evaluation", r"evaluation|limitation|weakness|improvement|systematic error|random error|reliab|validity"),
+    ),
+    pipeline="source_anchored_v2",
+    rubric_note="Physics guide, first assessment 2025 · verified for 2026",
 )
 
-EVIDENCE_TERMS = {
-    "Research design": r"research question|independent variable|dependent variable|control variable|apparatus|method(?:ology)?|procedure|repeat|range|interval",
-    "Data analysis": r"raw data|processed data|uncertaint|error bar|gradient|slope|graph|fit|regress|calculation|significant figure",
-    "Conclusion": r"conclusion|result|hypothesis|theor|accepted value|agreement|discrepan|percentage difference",
-    "Evaluation": r"evaluation|limitation|weakness|improvement|systematic error|random error|reliab|validity",
-}
+EE = AssessmentType(
+    key="ee",
+    label="Extended essay (EE)",
+    short_name="EE",
+    criteria=(
+        ("Framework for the essay", 6),
+        ("Knowledge and understanding", 6),
+        ("Analysis and line of argument", 6),
+        ("Discussion and evaluation", 8),
+    ),
+    rubric_file="ib_phy_ee_criteria.md",
+    prompt_files=("ee_primary_prompt.md", "ee_audit_prompt.md", "ee_moderator_prompt.md"),
+    evidence_terms=(
+        ("Framework for the essay", r"research question|method(?:ology)?|approach|experiment|simulation|primary data|secondary data|database|structure|scope|introduction"),
+        ("Knowledge and understanding", r"theor|law|principle|equation|model|concept|background|literature|source|reference|bibliograph"),
+        ("Analysis and line of argument", r"analys|data|graph|calculat|uncertaint|gradient|fit|trend|result|argument|therefore|suggests"),
+        ("Discussion and evaluation", r"discuss|conclusion|significan|implication|limitation|strength|weakness|evaluat|reliab|validity|further research"),
+    ),
+    pipeline="ee_evidence_audit_v2",
+    rubric_note="Extended essay guide, first assessment 2027 · descriptors paraphrased, verify",
+    marking_notice=(
+        "Criterion E (Reflection, 4 marks) is not marked, because the Reflection and Progress Form "
+        "is usually unavailable. Marks cover criteria A–D only and are out of 26, not the official 30."
+    ),
+)
+
+ASSESSMENT_TYPES = {assessment.key: assessment for assessment in (IA, EE)}
+
+# The IA names are kept for callers that predate the EE option.
+CRITERION_NAMES = IA.names
+EVIDENCE_TERMS = dict(IA.evidence_terms)
 
 INJECTION_DIRECTIVE_PATTERNS = {
     "instruction_override": (
@@ -31,7 +106,7 @@ INJECTION_DIRECTIVE_PATTERNS = {
     ),
     "perfect_score_command": (
         r"\b(?:give|award|assign|set|score|mark|grade)\b[^\n.!?]{0,80}"
-        r"\b(?:24\s*/\s*24|6\s*/\s*6)\b"
+        r"\b(?:24\s*/\s*24|26\s*/\s*26|30\s*/\s*30|4\s*/\s*4|6\s*/\s*6|8\s*/\s*8)\b"
     ),
     "role_spoofing": (
         r"\b(?:you are now|act as|assume the role of)\s+(?:the\s+)?"
@@ -78,7 +153,7 @@ def redact_injection_spans(text: str, matches: list[dict[str, object]]) -> str:
 def require_human_review(report: str, reason: str) -> str:
     """Apply a deterministic review flag to a model report after validation."""
     review_line = f"- **Human review recommended:** yes — {reason}"
-    pattern = r"(?im)^-\s*\*{0,2}Human review recommended:\*{0,2}\s*(?:yes|no)\b[^\n]*"
+    pattern = r"(?im)^-\s*" + _label("Human review recommended") + r"(?:yes|no)\b[^\n]*"
     if re.search(pattern, report):
         return re.sub(pattern, lambda _: review_line, report, count=1)
     return f"## Mandatory human review\n{review_line}\n\n{report}"
@@ -213,11 +288,13 @@ def _has_source_citation(text: str, used_digest: bool) -> bool:
     return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
 
 
-def report_has_expected_citations(report: str, used_digest: bool) -> bool:
-    """Require an evidence location for each of the four criterion decisions."""
+def report_has_expected_citations(
+    report: str, used_digest: bool, assessment: AssessmentType = IA
+) -> bool:
+    """Require an evidence location for each criterion decision."""
     if not report.strip():
         return False
-    for criterion in CRITERION_NAMES:
+    for criterion in assessment.names:
         heading = re.search(
             rf"^###\s+{re.escape(criterion)}\b[^\n]*\n(?P<body>.*?)(?=^#{2,3}\s|\Z)",
             report,
@@ -239,47 +316,84 @@ def report_has_expected_citations(report: str, used_digest: bool) -> bool:
     return True
 
 
-def report_validation_issues(report: str, used_digest: bool) -> list[str]:
+def _heading_mark(report: str, criterion: str, maximum: int) -> int | None:
+    """Read "### Criterion — X/max"; a mark above the maximum counts as missing."""
+    match = re.search(
+        rf"^###\s+{re.escape(criterion)}\s*(?:[—-]|\().*?(?<!\d)(\d)\s*/\s*{maximum}\b",
+        report,
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+    if match and int(match.group(1)) <= maximum:
+        return int(match.group(1))
+    return None
+
+
+def _cell_mark(cell: str, maximum: int) -> int | None:
+    match = re.fullmatch(rf"\s*\**(\d)(?:\s*/\s*{maximum})?\**\s*", cell)
+    if match and int(match.group(1)) <= maximum:
+        return int(match.group(1))
+    return None
+
+
+def report_validation_issues(
+    report: str, used_digest: bool, assessment: AssessmentType = IA
+) -> list[str]:
     """Return problems that prevent a report from being treated as complete."""
     if not report.strip():
         return ["The model returned an empty report."]
-    missing = [name for name in CRITERION_NAMES if name not in extract_report_scores(report)]
+    scores = extract_report_scores(report, assessment)
+    missing = [name for name in assessment.names if name not in scores]
     issues = []
     if missing:
         issues.append("Missing criterion marks: " + ", ".join(missing) + ".")
-    for criterion in CRITERION_NAMES:
-        heading = re.search(
-            rf"^###\s+{re.escape(criterion)}\s*(?:[—-]|\().*?(?<!\d)([0-6])\s*/\s*6\b",
-            report,
-            flags=re.IGNORECASE | re.MULTILINE,
-        )
+    for criterion, maximum in assessment.criteria:
+        heading = _heading_mark(report, criterion, maximum)
         row = re.search(
             rf"^\|\s*\**{re.escape(criterion)}\**\s*\|(?P<cells>[^\n]+)$",
             report,
             flags=re.IGNORECASE | re.MULTILINE,
         )
-        if heading and row:
+        if heading is not None and row:
             cells = row.group("cells").split("|")
             if len(cells) >= 3:
-                # Primary: Mark, Maximum, Reason. Moderator: Primary, Audit, Final, Maximum, Reason.
-                value = cells[2] if len(cells) >= 6 else cells[0]
-                final = re.fullmatch(r"\s*\**([0-6])(?:\s*/\s*6)?\**\s*", value)
-                if final and int(heading.group(1)) != int(final.group(1)):
+                final = _cell_mark(cells[2] if len(cells) >= 6 else cells[0], maximum)
+                if final is not None and heading != final:
                     issues.append(f"{criterion} heading and final table mark disagree.")
-    if not report_has_expected_citations(report, used_digest):
+    if len(scores) == len(assessment.criteria):
+        mark_sum = sum(scores.values())
+        for stated in report_stated_totals(report, assessment.total):
+            if stated != mark_sum:
+                issues.append(
+                    f"The stated total {stated}/{assessment.total} does not match the criterion marks "
+                    f"({mark_sum}/{assessment.total})."
+                )
+                break
+    if not report_has_expected_citations(report, used_digest, assessment):
         issues.append("Each criterion needs a page or digest citation.")
-    scores = extract_report_scores(report)
-    if len(scores) == 4:
-        for value in re.findall(r"(?i)\bTotal\**\s*:\**\s*(\d+)\s*/\s*24", report):
-            if int(value) != sum(scores.values()):
-                issues.append("Written total disagrees with criterion marks.")
-        for row in re.findall(r"(?im)^\|\s*\**Total\**\s*\|([^\n]+)", report):
-            cells = row.split("|")
-            value = cells[2] if len(cells) >= 6 else cells[0]
-            match = re.fullmatch(r"\s*\**(\d+)\**\s*", value)
-            if match and int(match.group(1)) != sum(scores.values()):
-                issues.append("Table total disagrees with criterion marks.")
     return issues
+
+
+def report_stated_totals(report: str, maximum_total: int = IA.total) -> list[int]:
+    """Return totals written in a report's summary line and marks table, if present."""
+    totals = []
+    line = re.search(
+        rf"\*{{0,2}}Total:\*{{0,2}}\s*\*{{0,2}}(\d{{1,2}})\s*/\s*{maximum_total}\b", report, re.IGNORECASE
+    )
+    if line:
+        totals.append(int(line.group(1)))
+    row = re.search(r"^\|\s*\**Total\**\s*\|(?P<cells>[^\n]+)$", report, re.IGNORECASE | re.MULTILINE)
+    if row:
+        values = []
+        for cell in row.group("cells").split("|"):
+            value = re.fullmatch(rf"\s*\**(\d{{1,2}})(?:\s*/\s*{maximum_total})?\**\s*", cell)
+            if value:
+                values.append(int(value.group(1)))
+        if len(values) > 1 and values[-1] == maximum_total:
+            values = values[:-1]  # drop the Maximum column
+        if values:
+            # Moderator tables list primary, audit and final totals in that order.
+            totals.append(values[2] if len(values) >= 3 else values[0])
+    return totals
 
 
 def report_cited_pages(report: str) -> set[int]:
@@ -299,24 +413,163 @@ def report_page_issues(report: str, page_count: int) -> list[str]:
         end = int(match.group(2)) if match.group(2) else start
         if not 1 <= start <= end <= page_count:
             issues.append(f"Invalid PDF page citation: {match.group(0)}.")
-    if re.search(r"\bCHUNK\s+\d+", report, re.IGNORECASE):
-        issues.append("Digest chunks are navigation only; cite verified original PDF pages.")
+    if re.search(r"\bCHUNK\s+\d+", report, re.IGNORECASE) and not report_cited_pages(report):
+        issues.append("Digest chunks need original PDF page references.")
     return issues
+
+
+def _label(label: str) -> str:
+    """Regex for a report label, with the colon inside or outside Markdown bold."""
+    return rf"\*{{0,2}}{re.escape(label)}(?::\*{{0,2}}|\*{{0,2}}\s*:)\s*\*{{0,2}}\s*"
 
 
 def audit_requests_review(report: str) -> bool:
     """An absent or ambiguous audit verdict is treated as needing moderation."""
-    verdict = re.search(r"\*{0,2}Escalation required:\*{0,2}\s*(yes|no)\b", report, re.IGNORECASE)
+    verdict = re.search(_label("Escalation required") + r"(yes|no)\b", report, re.IGNORECASE)
     return verdict is None or verdict.group(1).lower() == "yes"
+
+
+HUMAN_REVIEW_PATTERN = re.compile(
+    _label("Human review recommended") + r"(yes|no)\b\**[\s—–:-]*([^\n]*)",
+    flags=re.IGNORECASE,
+)
+
+
+def report_requests_human_review(report: str) -> bool:
+    """An absent or ambiguous human-review verdict is treated as a request for review."""
+    verdict = HUMAN_REVIEW_PATTERN.search(report)
+    return verdict is None or verdict.group(1).lower() == "yes"
+
+
+def human_review_reason(report: str) -> str:
+    verdict = HUMAN_REVIEW_PATTERN.search(report)
+    return verdict.group(2).strip().rstrip(".") if verdict else ""
 
 
 def primary_requests_human_review(report: str) -> bool:
-    verdict = re.search(
-        r"\*{0,2}Human review recommended:\*{0,2}\s*(yes|no)\b",
+    return report_requests_human_review(report)
+
+
+def _criterion_section(report: str, criterion: str) -> str | None:
+    match = re.search(
+        rf"^###\s+{re.escape(criterion)}\b[^\n]*\n(?P<body>.*?)(?=^#{{2,3}}\s|\Z)",
         report,
-        flags=re.IGNORECASE,
+        flags=re.IGNORECASE | re.MULTILINE | re.DOTALL,
     )
-    return verdict is None or verdict.group(1).lower() == "yes"
+    return match.group("body") if match else None
+
+
+def _mark_out_of(maximum: int) -> str:
+    return rf"(?<![\d.])(\d)\s*(?:/|out of)\s*{maximum}\b"
+
+
+def _labelled_mark(section: str, label: str, maximum: int = 6) -> int | None:
+    """Read the mark on a labelled line, e.g. "Keep 4/6" or "Raise from 4/6 to 5/6".
+
+    A mark after "to"/"→" is the recommendation; otherwise the first mark on the line is.
+    """
+    line = re.search(_label(label) + r"(?P<rest>[^\n]*)", section, flags=re.IGNORECASE)
+    if not line:
+        return None
+    rest = line.group("rest")
+    mark = _mark_out_of(maximum)
+    found = re.search(r"(?:\bto\b|→|->)\s*\**\s*" + mark, rest, flags=re.IGNORECASE)
+    if not found:
+        found = re.search(mark, rest, flags=re.IGNORECASE)
+    if found and int(found.group(1)) <= maximum:
+        return int(found.group(1))
+    return None
+
+
+def audit_mark_issues(
+    primary_report: str, audit_report: str, assessment: AssessmentType = IA
+) -> list[str]:
+    """Check that the audit heading, its recommendation and its quoted primary mark agree."""
+    primary = extract_report_scores(primary_report, assessment)
+    audited = extract_report_scores(audit_report, assessment)
+    issues = []
+    for criterion, maximum in assessment.criteria:
+        section = _criterion_section(audit_report, criterion)
+        if section is None:
+            continue
+        recommendation = _labelled_mark(section, "Audited mark recommendation", maximum)
+        heading = audited.get(criterion)
+        if recommendation is None:
+            issues.append(f"{criterion}: the audit gave no clear mark recommendation")
+        elif heading is not None and recommendation != heading:
+            issues.append(
+                f"{criterion}: audit heading {heading}/{maximum} but recommendation {recommendation}/{maximum}"
+            )
+        quoted_primary = _labelled_mark(section, "Primary mark", maximum)
+        if quoted_primary is not None and criterion in primary and quoted_primary != primary[criterion]:
+            issues.append(
+                f"{criterion}: the audit quoted the primary mark as {quoted_primary}/{maximum}, "
+                f"but the primary marker awarded {primary[criterion]}/{maximum}"
+            )
+    return issues
+
+
+QUOTE_PATTERN = re.compile(r"[“\"]([^”\"\n]{12,400})[”\"]")
+MIN_VERIFIABLE_PAGE_CHARS = 200
+
+
+def _normalize_for_match(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _fuzzy_contains(needle: str, haystack: str, threshold: float = 0.85) -> bool:
+    needle_tokens = needle.split()
+    haystack_tokens = haystack.split()
+    width = len(needle_tokens)
+    starts = {token for token in needle_tokens[:3]}
+    for index, token in enumerate(haystack_tokens):
+        if token not in starts:
+            continue
+        window = haystack_tokens[max(0, index - 2): index + width + 2]
+        matcher = SequenceMatcher(None, needle_tokens, window, autojunk=False)
+        matched = sum(block.size for block in matcher.get_matching_blocks())
+        if matched / width >= threshold:
+            return True
+    return False
+
+
+def unverified_quotes(
+    report: str,
+    page_texts: dict[int, str],
+    reference_text: str = "",
+) -> list[dict[str, object]]:
+    """Find quoted excerpts that do not appear in the extracted text of the cited pages.
+
+    Quotes of rubric or prompt wording, or of earlier reports, are ignored (pass them as
+    reference_text). Pages with too little extracted text to check, such as image-only
+    pages, are skipped rather than flagged.
+    """
+    reference = _normalize_for_match(reference_text)
+    findings: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for line in report.splitlines():
+        cited = sorted(page for page in report_cited_pages(line) if page in page_texts)
+        if not cited:
+            continue
+        if sum(len(page_texts[page]) for page in cited) < MIN_VERIFIABLE_PAGE_CHARS:
+            continue
+        window = sorted({near for page in cited for near in (page - 1, page, page + 1)} & set(page_texts))
+        haystack = _normalize_for_match(" ".join(page_texts[page] for page in window))
+        for match in QUOTE_PATTERN.finditer(line):
+            quote = match.group(1).strip()
+            fragments = [
+                _normalize_for_match(part) for part in re.split(r"\.\.\.|…|\[\.\.\.\]", quote)
+            ]
+            fragments = [part for part in fragments if len(part.split()) >= 4]
+            if not fragments or quote in seen:
+                continue
+            if all(part in reference for part in fragments):
+                continue
+            if all(part in haystack or _fuzzy_contains(part, haystack) for part in fragments):
+                continue
+            seen.add(quote)
+            findings.append({"quote": quote, "pages": cited})
+    return findings
 
 
 def moderation_reasons(
@@ -326,16 +579,22 @@ def moderation_reasons(
     visual_error: bool,
     visuals_without_source_images: bool,
     injection_review_required: bool = False,
+    *,
+    summary_used: bool = False,
+    unverified_quote_reasons: Iterable[str] = (),
+    assessment: AssessmentType = IA,
 ) -> list[str]:
-    primary = extract_report_scores(primary_report)
-    audited = extract_report_scores(audit_report)
+    primary = extract_report_scores(primary_report, assessment)
+    audited = extract_report_scores(audit_report, assessment)
     reasons = [
-        f"{criterion}: primary {primary[criterion]}/6, audit {audited[criterion]}/6"
-        for criterion in CRITERION_NAMES
+        f"{criterion}: primary {primary[criterion]}/{maximum}, audit {audited[criterion]}/{maximum}"
+        for criterion, maximum in assessment.criteria
         if criterion in primary and criterion in audited and primary[criterion] != audited[criterion]
     ]
-    if len(primary) != 4 or len(audited) != 4:
+    expected = len(assessment.criteria)
+    if len(primary) != expected or len(audited) != expected:
         reasons.append("A report is missing one or more criterion marks")
+    reasons.extend(audit_mark_issues(primary_report, audit_report, assessment))
     if primary_requests_human_review(primary_report):
         reasons.append("The primary marker requested human review or gave no clear verdict")
     if audit_requests_review(audit_report):
@@ -348,16 +607,39 @@ def moderation_reasons(
         reasons.append("A relevant original visual was not supplied to the marking calls")
     if injection_review_required:
         reasons.append("Possible marker-directed instructions or unscreened visuals require teacher review")
+    if summary_used:
+        reasons.append(
+            f"The {assessment.short_name} was summarised before marking, so the audit could not check the full text"
+        )
+    reasons.extend(unverified_quote_reasons)
     return reasons
 
 
-def build_agreed_decision(primary_report: str, audit_report: str) -> str:
+def _audit_overstated_claims(audit_report: str, criterion: str) -> str:
+    """Return the auditor's overstated-claims note for a criterion, unless it found none."""
+    section = _criterion_section(audit_report, criterion) or ""
+    match = re.search(
+        r"^-\s*\*{0,2}Unsupported or overstated claims:\*{0,2}\s*(?P<body>.*?)(?=^-\s|\Z)",
+        section,
+        flags=re.IGNORECASE | re.MULTILINE | re.DOTALL,
+    )
+    if not match:
+        return ""
+    note = " ".join(match.group("body").split())
+    if not note or re.match(r"[\"“]?none\b", note, re.IGNORECASE):
+        return ""
+    return note
+
+
+def build_agreed_decision(
+    primary_report: str, audit_report: str, assessment: AssessmentType = IA
+) -> str:
     """Finalize only exact agreement after the evidence audit passes."""
-    if moderation_reasons(primary_report, audit_report, [], False, False):
+    if moderation_reasons(primary_report, audit_report, [], False, False, assessment=assessment):
         raise ValueError("A moderated decision is required.")
-    scores = extract_report_scores(primary_report)
+    scores = extract_report_scores(primary_report, assessment)
     sections = []
-    for criterion in CRITERION_NAMES:
+    for criterion in assessment.names:
         match = re.search(
             rf"^###\s+{re.escape(criterion)}\b[^\n]*\n.*?(?=^#{2,3}\s|\Z)",
             primary_report,
@@ -365,16 +647,20 @@ def build_agreed_decision(primary_report: str, audit_report: str) -> str:
         )
         if not match:
             raise ValueError(f"Missing {criterion} evidence section.")
-        sections.append(match.group(0).strip())
+        section = match.group(0).strip()
+        audit_note = _audit_overstated_claims(audit_report, criterion)
+        if audit_note:
+            section += f"\n- **Audit note:** {audit_note}"
+        sections.append(section)
     total = sum(scores.values())
     return (
         "## Final decision\n"
-        f"- **Total:** {total}/24\n"
-        "- **Human review recommended:** no — the evidence audit confirmed all four marks and no extraction warning was detected.\n"
+        f"- **Total:** {total}/{assessment.total}\n"
+        f"- **Human review recommended:** no — the evidence audit confirmed all {assessment.count_word} marks and no extraction warning was detected.\n"
         "- **Decision route:** primary marks confirmed by evidence audit; no chief moderation was needed.\n\n"
         "## Criterion decisions\n\n"
         + "\n\n".join(sections)
-        + "\n\nReview the cited pages in the original IA before using this recommendation."
+        + f"\n\nReview the cited pages in the original {assessment.short_name} before using this recommendation."
     )
 
 
@@ -408,13 +694,16 @@ def build_page_evidence_index(
     return "\n".join(lines)
 
 
-def build_candidate_evidence_ledger(raw_text: str, per_criterion_limit: int = 8) -> str:
-    """Quote likely relevant IA lines with source pages; make no inference or mark."""
+def build_candidate_evidence_ledger(
+    raw_text: str, per_criterion_limit: int = 8, assessment: AssessmentType = IA
+) -> str:
+    """Quote likely relevant student lines with source pages; make no inference or mark."""
     lines = [
-        "Candidate evidence excerpts from the student's IA (untrusted; verify against the full page):"
+        f"Candidate evidence excerpts from the student's {assessment.short_name} "
+        "(untrusted; verify against the full page):"
     ]
     pages = split_pages(raw_text)
-    for criterion, terms in EVIDENCE_TERMS.items():
+    for criterion, terms in assessment.evidence_terms:
         excerpts = []
         for page_number, page_text in pages:
             for line in page_text.splitlines()[1:]:
@@ -423,7 +712,7 @@ def build_candidate_evidence_ledger(raw_text: str, per_criterion_limit: int = 8)
                     continue
                 excerpts.append(f"- Page {page_number}: {excerpt[:240]}")
         lines.append(f"## {criterion}")
-        lines.extend(sample_evenly(excerpts, per_criterion_limit) or ["- No keyword-matched excerpt found; inspect the full IA."])
+        lines.extend(sample_evenly(excerpts, per_criterion_limit) or [f"- No keyword-matched excerpt found; inspect the full {assessment.short_name}."])
     return "\n".join(lines)
 
 
@@ -436,23 +725,20 @@ def build_evaluation_record(
     decision_mode: str,
     escalation_reasons: list[str],
     usage_log: list[dict[str, object]],
+    assessment: AssessmentType = IA,
 ) -> dict[str, object]:
-    """Export marks and run metadata without the student's IA or report text."""
-    review = re.search(
-        r"\*{0,2}Human review recommended:\*{0,2}\s*(yes|no)\b",
-        final_report,
-        flags=re.IGNORECASE,
-    )
+    """Export marks and run metadata without the student's work or report text."""
     return {
         "case_id": case_id,
-        "pipeline": "source_anchored_v2",
+        "assessment": assessment.key,
+        "pipeline": assessment.pipeline,
         "model": model,
-        "primary_marks": extract_report_scores(primary_report),
-        "audit_marks": extract_report_scores(audit_report),
-        "marks": extract_report_scores(final_report),
+        "primary_marks": extract_report_scores(primary_report, assessment),
+        "audit_marks": extract_report_scores(audit_report, assessment),
+        "marks": extract_report_scores(final_report, assessment),
         "decision_mode": decision_mode,
         "escalation_reasons": escalation_reasons,
-        "review_recommended": review is None or review.group(1).lower() == "yes",
+        "review_recommended": report_requests_human_review(final_report),
         "api_input_tokens": sum(int(entry.get("input_tokens") or 0) for entry in usage_log),
         "api_output_tokens": sum(int(entry.get("output_tokens") or 0) for entry in usage_log),
         "api_seconds": round(sum(float(entry.get("seconds") or 0) for entry in usage_log), 2),
@@ -544,17 +830,13 @@ def sample_evenly(items: Iterable[object], limit: int) -> list[object]:
     return [items_list[index] for index in unique_indices]
 
 
-def extract_report_scores(report: str) -> dict[str, int]:
+def extract_report_scores(report: str, assessment: AssessmentType = IA) -> dict[str, int]:
     """Extract final/awarded criterion marks from a generated Markdown report."""
     scores: dict[str, int] = {}
-    for criterion in CRITERION_NAMES:
-        heading_pattern = re.compile(
-            rf"^###\s+{re.escape(criterion)}\s*(?:[—-]|\().*?(?<!\d)([0-6])\s*/\s*6\b",
-            flags=re.IGNORECASE | re.MULTILINE,
-        )
-        heading_match = heading_pattern.search(report)
-        if heading_match:
-            scores[criterion] = int(heading_match.group(1))
+    for criterion, maximum in assessment.criteria:
+        heading_mark = _heading_mark(report, criterion, maximum)
+        if heading_mark is not None:
+            scores[criterion] = heading_mark
             continue
 
         table_pattern = re.compile(
@@ -565,26 +847,182 @@ def extract_report_scores(report: str) -> dict[str, int]:
         if table_match:
             marks = []
             for cell in table_match.group("cells").split("|"):
-                mark = re.fullmatch(r"\s*\**([0-6])(?:\s*/\s*6)?\**\s*", cell)
-                if mark:
-                    marks.append(int(mark.group(1)))
+                mark = _cell_mark(cell, maximum)
+                if mark is not None:
+                    marks.append(mark)
             if marks:
                 # Moderator tables place the final mark after both examiner marks.
                 scores[criterion] = marks[2] if len(marks) >= 3 else marks[0]
     return scores
 
 
+SUGGESTIONS_PROMPT_FILE = "suggestions_prompt.md"
+SUGGESTIONS_HEADING = "## Suggestions for improvement"
+
+
+def suggestions_validation_issues(
+    report: str, used_digest: bool, assessment: AssessmentType = IA
+) -> list[str]:
+    """Check the student-facing suggestions: one cited section per marked criterion, no marks."""
+    if not report.strip():
+        return ["The model returned no suggestions."]
+    issues = []
+    if not re.search(rf"^{re.escape(SUGGESTIONS_HEADING)}\s*$", report, flags=re.IGNORECASE | re.MULTILINE):
+        issues.append(f"The suggestions need the heading '{SUGGESTIONS_HEADING}'.")
+    missing = [name for name in assessment.names if _criterion_section(report, name) is None]
+    if missing:
+        issues.append("Missing suggestion sections: " + ", ".join(missing) + ".")
+    elif not report_has_expected_citations(report, used_digest, assessment):
+        issues.append("Each suggestion section needs a page or digest citation.")
+    if any(_heading_mark(report, name, maximum) is not None for name, maximum in assessment.criteria):
+        issues.append("Suggestions for the student must not state criterion marks.")
+    return issues
+
+
+EXAMINER_NOTES_PROMPT_FILE = "examiner_notes_prompt.md"
+# Appended to the suggestions prompt only when annotated PDFs are requested.
+STUDENT_NOTES_PROMPT_FILE = "student_notes_prompt.md"
+MARGIN_NOTES_HEADING = "## Margin notes"
+MAX_MARGIN_NOTES = 40
+# A note for the student must not reveal marks, markbands or grades.
+STUDENT_NOTE_MARK_PATTERN = re.compile(
+    r"\b\d+\s*/\s*(?:4|6|8|24|26|30)\b|\bmark ?bands?\b|\bmarks?\b|\bgrades?\b", re.IGNORECASE
+)
+
+
+def split_margin_notes(
+    report: str,
+    page_count: int,
+    assessment: AssessmentType = IA,
+    *,
+    for_student: bool = False,
+) -> tuple[str, list[dict[str, object]], list[str]]:
+    """Separate a report's "## Margin notes" JSON from its Markdown body.
+
+    Returns the body, the usable notes ({page, quote, note, label}) and warnings about notes
+    that were dropped. Invalid or missing JSON gives no notes rather than an error, because
+    margin notes are an aid and never affect marks.
+    """
+    match = re.search(rf"^{re.escape(MARGIN_NOTES_HEADING)}\s*$", report, flags=re.IGNORECASE | re.MULTILINE)
+    if not match:
+        return report.strip(), [], ["No margin notes were returned."]
+    body = report[: match.start()].strip()
+    section = report[match.end():]
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", section, flags=re.DOTALL)
+    raw = fenced.group(1) if fenced else section[section.find("["): section.rfind("]") + 1]
+    try:
+        items = json.loads(raw)
+    except ValueError:
+        return body, [], ["The margin notes could not be read."]
+    if not isinstance(items, list):
+        return body, [], ["The margin notes could not be read."]
+    notes: list[dict[str, object]] = []
+    dropped = {"page": 0, "marks": 0, "format": 0, "length": 0, "count": 0}
+    criterion_counts = {}
+    for item in items:
+        if not isinstance(item, dict):
+            dropped["format"] += 1
+            continue
+        page, quote, note = item.get("page"), item.get("quote") or "", item.get("note")
+        if type(page) is not int or not isinstance(quote, str) or not isinstance(note, str) or not note.strip():
+            dropped["format"] += 1
+            continue
+        if not 1 <= page <= page_count:
+            dropped["page"] += 1
+            continue
+        if for_student and STUDENT_NOTE_MARK_PATTERN.search(note):
+            dropped["marks"] += 1
+            continue
+        label = item.get("criterion")
+        if len(note.split()) > 40 or len(quote.split()) > 20:
+            dropped["length"] += 1
+            continue
+        group = label if isinstance(label, str) and label in assessment.names else "General"
+        if criterion_counts.get(group, 0) >= 3:
+            dropped["count"] += 1
+            continue
+        criterion_counts[group] = criterion_counts.get(group, 0) + 1
+        notes.append(
+            {
+                "page": page,
+                "quote": " ".join(quote.split()),
+                "note": " ".join(note.split()),
+                "label": label if label in assessment.names else "General",
+            }
+        )
+    warnings = []
+    if dropped["page"]:
+        warnings.append(f"{dropped['page']} margin note(s) cited pages outside this PDF and were dropped.")
+    if dropped["marks"]:
+        warnings.append(f"{dropped['marks']} student margin note(s) mentioned marks and were dropped.")
+    if dropped["format"]:
+        warnings.append(f"{dropped['format']} margin note(s) were incomplete and were dropped.")
+    if dropped["length"]:
+        warnings.append(f"{dropped['length']} margin note(s) exceeded the concise comment or quote limit and were dropped.")
+    if dropped["count"]:
+        warnings.append(f"{dropped['count']} extra margin note(s) exceeded three per criterion and were dropped.")
+    if len(notes) > MAX_MARGIN_NOTES:
+        warnings.append(f"Only the first {MAX_MARGIN_NOTES} margin notes are used.")
+        notes = notes[:MAX_MARGIN_NOTES]
+    return body, notes, warnings
+
+
+def build_examiner_cover(
+    assessment: AssessmentType,
+    final_report: str,
+    status_message: str,
+) -> str:
+    """First pages of the examiner's annotated PDF: marks, status, and the full final decision."""
+    scores = extract_report_scores(final_report, assessment)
+    lines = [f"# Examiner copy: IB DP Physics {assessment.short_name}"]
+    if assessment.marking_notice:
+        lines.append(f"> **Note:** {assessment.marking_notice}")
+    lines += ["", "| Criterion | Mark | Maximum |", "|---|---:|---:|"]
+    for criterion, maximum in assessment.criteria:
+        mark = scores.get(criterion)
+        lines.append(f"| {criterion} | {'—' if mark is None else mark} | {maximum} |")
+    total = sum(scores.values()) if len(scores) == len(assessment.criteria) else "—"
+    lines.append(f"| **Total** | **{total}** | **{assessment.total}** |")
+    if status_message:
+        lines += ["", status_message.replace("  \n", "\n\n")]
+    lines += [
+        "",
+        "Numbered margin notes on the following pages show the evidence behind these marks. "
+        "Notes marked “page note” could not be matched to the page's text; check them against the page.",
+        "",
+        "---",
+        "",
+        final_report.strip(),
+    ]
+    return "\n".join(lines)
+
+
+def build_suggestions_document(report: str, assessment: AssessmentType = IA) -> str:
+    """The separately downloadable, student-facing suggestions."""
+    return (
+        f"# IB DP Physics {assessment.short_name}: suggestions for improvement\n\n"
+        "These suggestions are based on the draft you submitted. Page numbers refer to that PDF.\n\n"
+        + report.strip()
+        + "\n"
+    )
+
+
 def build_combined_report(
     examiner1_report: str,
     examiner2_report: str,
     moderator_report: str,
+    assessment: AssessmentType = IA,
+    suggestions_report: str = "",
 ) -> str:
     """Create a single downloadable Markdown bundle from completed reports."""
-    sections = ["# IB DP Physics IA assessment bundle"]
+    sections = [f"# IB DP Physics {assessment.short_name} assessment bundle"]
+    if assessment.marking_notice:
+        sections[0] += f"\n\n> **Note:** {assessment.marking_notice}"
     for title, report in (
-        ("Primary mark — Experimentalist", examiner1_report),
+        ("Primary mark — Experimentalist" if assessment is IA else "Primary mark", examiner1_report),
         ("Evidence audit", examiner2_report),
         ("Final decision", moderator_report),
+        ("Suggestions for improvement (for the student)", suggestions_report),
     ):
         if report.strip():
             sections.extend([f"## {title}", report.strip()])

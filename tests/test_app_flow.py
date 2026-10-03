@@ -19,7 +19,17 @@ def setup_app(monkeypatch, source_pdf, records):
 
     def create(**kwargs):
         calls.append(kwargs)
-        record = records(kwargs) if callable(records) else records.pop(0)
+        if kwargs['instructions'].startswith("Write concise, evidence-based, actionable suggestions"):
+            from app_utils import IA, EE
+            assessment = EE if 'Physics EE' in kwargs['instructions'] else IA
+            record = '## Suggestions for improvement\n' + '\n'.join(
+                f'### {name}\n- Clarify the explanation on Page 1.' for name in assessment.names)
+            if '## Margin notes' in str(kwargs['input']):
+                record += '\n## Margin notes\n```json\n' + json.dumps([{
+                    'page': 1, 'quote': 'The measured force was 2 N.', 'criterion': assessment.names[0],
+                    'note': 'Explain how force was measured.'}]) + '\n```'
+        else:
+            record = records(kwargs) if callable(records) else records.pop(0)
         output = record if isinstance(record, str) else json.dumps(record)
         return SimpleNamespace(output_text=output, status='completed', usage=None)
 
@@ -39,10 +49,11 @@ def click(app, label):
 def test_complete_assessment_source_navigation_download_and_rerun(monkeypatch, source_pdf, assessment_record):
     records = [deepcopy(assessment_record) for _ in range(3)]
     app, calls = setup_app(monkeypatch, source_pdf, records)
+    next(toggle for toggle in app.toggle if toggle.label == 'Create annotated PDFs').set_value(True).run()
     click(app, 'Run complete assessment')
     assert app.session_state['decision_mode'] == 'audited agreement'
     assert app.session_state['assessment_records']['final']['total'] == 16
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert all(call['store'] is False for call in calls)
     assert app.session_state['annotation_export']
     click(app, 'View Page 1')
@@ -61,7 +72,7 @@ def test_human_review_verdict_stays_provisional(monkeypatch, source_pdf, assessm
     app, _ = setup_app(monkeypatch, source_pdf, records)
     click(app, 'Run complete assessment')
     assert app.session_state['decision_mode'] == 'moderated'
-    assert any(metric.label == 'Provisional total' for metric in app.metric)
+    assert any('Provisional total' in item.value for item in app.markdown)
     assert not any('Final decision ready' in success.value for success in app.success)
 
 
@@ -70,7 +81,7 @@ def test_validation_repairs_once_before_display(monkeypatch, source_pdf, assessm
     invalid['criteria'][0]['annotations'][0]['quote'] = 'Invented source quotation.'
     app, calls = setup_app(monkeypatch, source_pdf, [invalid, deepcopy(assessment_record), deepcopy(assessment_record)])
     click(app, 'Run complete assessment')
-    assert len(calls) == 3
+    assert len(calls) == 4
     assert 'Invented source quotation' not in app.session_state['moderator_report']
 
 
@@ -90,7 +101,7 @@ def test_model_cannot_clear_extraction_warning(monkeypatch, source_pdf, assessme
     final = app.session_state['assessment_records']['final']
     assert final['review_required']
     assert any('Low OCR' in reason for reason in final['review_reasons'])
-    assert any(metric.label == 'Provisional total' for metric in app.metric)
+    assert any('Provisional total' in item.value for item in app.markdown)
 
 
 def test_digest_is_navigation_only_and_missing_originals_stay_provisional(monkeypatch, source_pdf, assessment_record):
@@ -117,3 +128,19 @@ def test_digest_is_navigation_only_and_missing_originals_stay_provisional(monkey
     click(app, 'Run complete assessment')
     assert app.session_state['source_text_gaps'] == [2]
     assert app.session_state['assessment_records']['final']['review_required']
+
+
+def test_ee_flow_and_assessment_switch_are_preserved(monkeypatch, source_pdf, assessment_record):
+    from test_extended_essay import _ee_report
+    from app_utils import EE, extract_report_scores
+    app, calls = setup_app(monkeypatch, source_pdf, [_ee_report(), _ee_report(audit_verdict="no")])
+    app.radio(key='assessment_choice').set_value('ee').run()
+    click(app, 'Run complete assessment')
+    assert app.session_state['decision_mode'] == 'audited agreement'
+    assert sum(extract_report_scores(app.session_state['moderator_report'], EE).values()) == 12
+    assert any('26' in warning.value and 'Reflection' in warning.value for warning in app.warning)
+    assert not app.session_state['assessment_records']
+    assert app.session_state['suggestions_report']
+    app.radio(key='assessment_choice').set_value('ia').run()
+    assert app.session_state['moderator_report'] == ''
+    assert app.session_state['suggestions_report'] == ''

@@ -7,12 +7,15 @@ from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DictionaryObject, NameObject, StreamObject
 
 from pdf_utils import (
+    PageRenderer,
     ExtractedVisual,
     PdfExtractionError,
     PdfPasswordRequiredError,
     SourceImage,
     attach_unambiguous_captions,
+    available_ocr_languages,
     ocr_pdf_page,
+    pdf_requires_password,
     prepare_source_images,
     render_pdf_page_image,
     screen_source_images,
@@ -71,6 +74,29 @@ def test_extract_pdf_text_requires_password_for_encrypted_pdf() -> None:
 
     with pytest.raises(PdfPasswordRequiredError):
         extract_pdf_text(encrypted_pdf, use_ocr=False, ocr_language="eng")
+
+
+def test_pdf_requires_password_detects_user_password() -> None:
+    assert pdf_requires_password(build_encrypted_pdf("secret")) is True
+    assert pdf_requires_password(build_encrypted_pdf("")) is False
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    assert pdf_requires_password(buffer.getvalue()) is False
+    assert pdf_requires_password(b"not a pdf") is False
+
+
+def test_available_ocr_languages_lists_english_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("pdf_utils.pytesseract.get_languages", lambda config="": ["osd", "fra", "eng"])
+    assert available_ocr_languages() == ["eng", "fra"]
+
+    def missing(config: str = "") -> list[str]:
+        raise OSError("tesseract not installed")
+
+    monkeypatch.setattr("pdf_utils.pytesseract.get_languages", missing)
+    assert available_ocr_languages() == ["eng"]
 
 
 def test_extract_pdf_text_rejects_wrong_password_for_encrypted_pdf() -> None:
@@ -272,3 +298,62 @@ def test_pdfium_render_accepts_pdf_password(
 def test_ocr_pdf_page_surfaces_renderer_failures() -> None:
     with pytest.raises(PdfExtractionError, match="outside the PDF"):
         ocr_pdf_page(build_image_pdf(), page_number=2, language="eng")
+
+
+def test_page_renderer_opens_once_and_reuses_the_last_render() -> None:
+    pdf = encrypt_pdf(build_image_pdf(), "secret")
+    with PageRenderer(pdf, "secret") as renderer:
+        first = renderer.render(1)
+        assert renderer.render(1) is first
+        assert renderer.render_count == 1
+        renderer.render(1, dpi=72)
+        assert renderer.render_count == 2
+        with pytest.raises(PdfExtractionError, match="outside the PDF"):
+            renderer.render(2)
+    with pytest.raises(PdfExtractionError, match="Unable to render"):
+        PageRenderer(pdf).render(1)
+
+
+def test_extraction_renders_a_page_once_for_both_ocr_and_vector_rasterization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    instances: list[PageRenderer] = []
+
+    class CountingRenderer(PageRenderer):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            instances.append(self)
+
+    vector = ExtractedVisual(1, "vector", None, 10, 10, b"", kind="vector")
+    monkeypatch.setattr("pdf_utils.PageRenderer", CountingRenderer)
+    monkeypatch.setattr("pdf_utils.extract_page_images", lambda page, page_number: [])
+    monkeypatch.setattr("pdf_utils.extract_vector_graphics", lambda page, page_number: [vector])
+    monkeypatch.setattr("pdf_utils.pytesseract.image_to_string", lambda *args, **kwargs: "OCR text")
+    monkeypatch.setattr("pdf_utils.pytesseract.image_to_data", lambda *args, **kwargs: {"conf": ["88"]})
+
+    text, _, ocr_pages, _, visuals = extract_pdf_text(build_image_pdf(), use_ocr=True, ocr_language="eng")
+
+    assert "[OCR]\nOCR text" in text and ocr_pages == 1
+    assert visuals[0].rasterized_data.startswith(b"\x89PNG")
+    assert len(instances) == 1 and instances[0].render_count == 1
+
+
+def test_unreadable_page_text_is_logged_not_silently_dropped(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    writer = PdfWriter()
+    add_text_page(writer, "Readable text")
+    buffer = io.BytesIO()
+    writer.write(buffer)
+
+    def broken_extract_text(self, *args, **kwargs):
+        raise KeyError("/Font")
+
+    monkeypatch.setattr("pypdf.PageObject.extract_text", broken_extract_text)
+    with caplog.at_level("WARNING", logger="pdf_utils"):
+        text, pages, _, diagnostics, _ = extract_pdf_text(buffer.getvalue(), use_ocr=False, ocr_language="eng")
+
+    assert pages == 1
+    assert "[No extractable text found on this page]" in text
+    assert diagnostics[0].has_text is False
+    assert "Skipped selectable text on page 1" in caplog.text
